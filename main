@@ -234,7 +234,7 @@ LightingGroup:AddToggle('AlwaysNightToggle', {
 })
 
 --------------------------------------------------------------------------------
--- 5. LEADERBOARD SPECTATE SYSTEM (DIRECT WORKSPACE.LIVE LOOKUP)
+-- 5. LEADERBOARD SPECTATE SYSTEM (USER-BASED FOLDER MATCHING)
 --------------------------------------------------------------------------------
 local spectateEnabled = true
 local spectatingTargetName = nil
@@ -242,7 +242,7 @@ local spectatingTargetName = nil
 local function resetSpectateCamera()
     local liveFolder = Workspace:FindFirstChild("Live") or Workspace
     local char = LocalPlayer.Character or liveFolder:FindFirstChild(LocalPlayer.Name)
-    local hum = char and char:FindFirstChildWhichIsA("Humanoid")
+    local hum = char and char:FindFirstChildWhichIsA("Humanoid", true) or (char and char:FindFirstChild("HumanoidRootPart"))
     if hum then
         Camera.CameraType = Enum.CameraType.Custom
         Camera.CameraSubject = hum
@@ -265,41 +265,54 @@ local function hookLeaderboardSpectate()
                 local label = entry:IsA("TextLabel") and entry or entry:FindFirstChildWhichIsA("TextLabel", true)
                 if not label or label.Text == "" then return end
                 
-                local clickedText = string.gsub(label.Text, "^%s*(.-)%s*$", "%1")
+                local rawText = string.gsub(label.Text, "^%s*(.-)%s*$", "%1")
                 
-                if spectatingTargetName == clickedText then
+                if spectatingTargetName == rawText then
                     resetSpectateCamera()
                     Library:Notify({ Title = "Spectate", Description = "Reset camera to self", Time = 2 })
                     return
                 end
 
+                local targetUser = nil
+
+                -- 1. Try to find player object matching DisplayName or Username
+                for _, player in ipairs(Players:GetPlayers()) do
+                    if string.find(rawText, player.Name, 1, true) or string.find(rawText, player.DisplayName, 1, true) then
+                        targetUser = player.Name
+                        break
+                    end
+                end
+
+                -- 2. If no direct player match, check if raw string matches any folder directly in Workspace.Live
                 local liveFolder = Workspace:FindFirstChild("Live") or Workspace
-                
-                -- Attempt 1: Direct match in Workspace.Live
-                local targetModel = liveFolder:FindFirstChild(clickedText)
-                
-                -- Attempt 2: Case-insensitive / Substring match in Workspace.Live
-                if not targetModel then
-                    local lowerText = string.lower(clickedText)
+                local targetInstance = targetUser and liveFolder:FindFirstChild(targetUser) or liveFolder:FindFirstChild(rawText)
+
+                -- 3. Fallback: Search all children inside Workspace.Live for partial name matches
+                if not targetInstance then
+                    local lowerText = string.lower(rawText)
                     for _, child in ipairs(liveFolder:GetChildren()) do
                         local lowerName = string.lower(child.Name)
-                        if lowerName == lowerText or string.find(lowerName, lowerText, 1, true) or string.find(lowerText, lowerName, 1, true) then
-                            targetModel = child
+                        if string.find(lowerText, lowerName, 1, true) or string.find(lowerName, lowerText, 1, true) then
+                            targetInstance = child
                             break
                         end
                     end
                 end
 
-                if targetModel then
-                    local cameraSubject = targetModel:FindFirstChildWhichIsA("Humanoid") or targetModel:FindFirstChild("HumanoidRootPart")
+                if targetInstance then
+                    -- Search recursively inside the folder/model for a Humanoid or HumanoidRootPart
+                    local cameraSubject = targetInstance:FindFirstChildWhichIsA("Humanoid", true) or targetInstance:FindFirstChild("HumanoidRootPart", true)
+                    
                     if cameraSubject then
                         Camera.CameraType = Enum.CameraType.Custom
                         Camera.CameraSubject = cameraSubject
-                        spectatingTargetName = clickedText
-                        Library:Notify({ Title = "Spectating", Description = "Spectating: " .. targetModel.Name, Time = 2 })
+                        spectatingTargetName = rawText
+                        Library:Notify({ Title = "Spectating", Description = "Spectating: " .. targetInstance.Name, Time = 2 })
+                    else
+                        Library:Notify({ Title = "Spectate Error", Description = "No RootPart/Humanoid found inside " .. targetInstance.Name, Time = 3 })
                     end
                 else
-                    Library:Notify({ Title = "Spectate Error", Description = "Model not found in Workspace.Live: " .. clickedText, Time = 3 })
+                    Library:Notify({ Title = "Spectate Error", Description = "Could not map leaderboard entry to Workspace.Live", Time = 3 })
                 end
             end
         end)
