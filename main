@@ -91,7 +91,7 @@ local function identifyTrinket(instance)
 end
 
 --------------------------------------------------------------------------------
--- 1. FLIGHT LOGIC (OPTIMIZED)
+-- 1. FLIGHT LOGIC
 --------------------------------------------------------------------------------
 local flying = false
 local flySpeed = 50
@@ -124,9 +124,7 @@ local function fly()
 end
 
 local FlyToggle = MovementGroup:AddToggle('FlyToggle', {
-    Text = 'Fly',
-    Tooltip = 'Fly around the map',
-    Default = false,
+    Text = 'Fly', Default = false,
     Callback = function(Value)
         flying = Value
         if flying then
@@ -147,7 +145,7 @@ MovementGroup:AddSlider('FlySpeed', {
 })
 
 --------------------------------------------------------------------------------
--- 2. NOCLIP LOGIC (OPTIMIZED)
+-- 2. NOCLIP LOGIC
 --------------------------------------------------------------------------------
 local noclip = false
 local noclipConnection = nil
@@ -174,7 +172,7 @@ local NoClipToggle = PhysicsGroup:AddToggle('NoClipToggle', {
 NoClipToggle:AddKeyPicker("NoClipKeybind", { Default = "KeypadPlus", SyncToggleState = true, Mode = "Toggle", Text = "NoClip Keybind" })
 
 --------------------------------------------------------------------------------
--- 3. REMOTE DESTRUCTION NOFALL LOGIC (EVENT-BASED OPTIMIZATION)
+-- 3. REMOTE DESTRUCTION NOFALL LOGIC
 --------------------------------------------------------------------------------
 local noFallRemoteEnabled = false
 local noFallCharConnection = nil
@@ -236,57 +234,10 @@ LightingGroup:AddToggle('AlwaysNightToggle', {
 })
 
 --------------------------------------------------------------------------------
--- 5. LEADERBOARD SPECTATE SYSTEM (ROBUST MATCHING)
+-- 5. LEADERBOARD SPECTATE SYSTEM (DIRECT WORKSPACE.LIVE LOOKUP)
 --------------------------------------------------------------------------------
 local spectateEnabled = true
-local spectatingPlayerName = nil
-local playerRPNameCache = {}
-
--- Helper to safely clean string inputs
-local function sanitizeName(str)
-    if not str then return "" end
-    -- Remove non-standard whitespace and trailing/leading spaces
-    return string.lower(string.gsub(tostring(str), "^%s*(.-)%s*$", "%1"))
-end
-
-local function updatePlayerCache(player)
-    if not player then return end
-    
-    -- Recursive search inside player for FirstName and LastName StringValues
-    local firstNameVal = player:FindFirstChild("FirstName", true)
-    local lastNameVal = player:FindFirstChild("LastName", true)
-
-    local firstName = firstNameVal and sanitizeName(firstNameVal.Value) or ""
-    local lastName = lastNameVal and sanitizeName(lastNameVal.Value) or ""
-
-    -- Store full name ("first last")
-    if firstName ~= "" and lastName ~= "" then
-        playerRPNameCache[firstName .. " " .. lastName] = player
-    end
-
-    -- Store individual first and last names as fallbacks
-    if firstName ~= "" then playerRPNameCache[firstName] = player end
-    if lastName ~= "" then playerRPNameCache[lastName] = player end
-
-    -- Store account username as fallback
-    playerRPNameCache[sanitizeName(player.Name)] = player
-    playerRPNameCache[sanitizeName(player.DisplayName)] = player
-end
-
-local function refreshAllPlayerCaches()
-    table.clear(playerRPNameCache)
-    for _, player in ipairs(Players:GetPlayers()) do 
-        updatePlayerCache(player) 
-    end
-end
-
--- Force refresh cache on player changes
-Players.PlayerAdded:Connect(updatePlayerCache)
-Players.PlayerRemoving:Connect(function(player)
-    refreshAllPlayerCaches()
-end)
-
-refreshAllPlayerCaches()
+local spectatingTargetName = nil
 
 local function resetSpectateCamera()
     local liveFolder = Workspace:FindFirstChild("Live") or Workspace
@@ -296,32 +247,7 @@ local function resetSpectateCamera()
         Camera.CameraType = Enum.CameraType.Custom
         Camera.CameraSubject = hum
     end
-    spectatingPlayerName = nil
-end
-
-local function resolvePlayerFromText(rawText)
-    local cleanText = sanitizeName(rawText)
-    if cleanText == "" then return nil end
-
-    -- Direct cache lookup
-    if playerRPNameCache[cleanText] then
-        return playerRPNameCache[cleanText]
-    end
-
-    -- Fallback 1: Dynamic re-scan of all players in case values updated late
-    refreshAllPlayerCaches()
-    if playerRPNameCache[cleanText] then
-        return playerRPNameCache[cleanText]
-    end
-
-    -- Fallback 2: Substring / Partial match search
-    for rpName, playerObj in pairs(playerRPNameCache) do
-        if string.find(rpName, cleanText, 1, true) or string.find(cleanText, rpName, 1, true) then
-            return playerObj
-        end
-    end
-
-    return nil
+    spectatingTargetName = nil
 end
 
 local function hookLeaderboardSpectate()
@@ -339,31 +265,41 @@ local function hookLeaderboardSpectate()
                 local label = entry:IsA("TextLabel") and entry or entry:FindFirstChildWhichIsA("TextLabel", true)
                 if not label or label.Text == "" then return end
                 
-                local rpNameText = label.Text
-                if spectatingPlayerName == rpNameText then
+                local clickedText = string.gsub(label.Text, "^%s*(.-)%s*$", "%1")
+                
+                if spectatingTargetName == clickedText then
                     resetSpectateCamera()
                     Library:Notify({ Title = "Spectate", Description = "Reset camera to self", Time = 2 })
                     return
                 end
 
-                local targetPlayer = resolvePlayerFromText(rpNameText)
-
-                if not targetPlayer then
-                    Library:Notify({ Title = "Spectate Error", Description = "Could not resolve player: " .. rpNameText, Time = 3 })
-                    return
+                local liveFolder = Workspace:FindFirstChild("Live") or Workspace
+                
+                -- Attempt 1: Direct match in Workspace.Live
+                local targetModel = liveFolder:FindFirstChild(clickedText)
+                
+                -- Attempt 2: Case-insensitive / Substring match in Workspace.Live
+                if not targetModel then
+                    local lowerText = string.lower(clickedText)
+                    for _, child in ipairs(liveFolder:GetChildren()) do
+                        local lowerName = string.lower(child.Name)
+                        if lowerName == lowerText or string.find(lowerName, lowerText, 1, true) or string.find(lowerText, lowerName, 1, true) then
+                            targetModel = child
+                            break
+                        end
+                    end
                 end
 
-                local liveFolder = Workspace:FindFirstChild("Live") or Workspace
-                local targetChar = liveFolder:FindFirstChild(targetPlayer.Name)
-                local cameraSubject = targetChar and (targetChar:FindFirstChildWhichIsA("Humanoid") or targetChar:FindFirstChild("HumanoidRootPart"))
-
-                if cameraSubject then
-                    Camera.CameraType = Enum.CameraType.Custom
-                    Camera.CameraSubject = cameraSubject
-                    spectatingPlayerName = rpNameText
-                    Library:Notify({ Title = "Spectating", Description = "Spectating: " .. targetPlayer.Name, Time = 2 })
+                if targetModel then
+                    local cameraSubject = targetModel:FindFirstChildWhichIsA("Humanoid") or targetModel:FindFirstChild("HumanoidRootPart")
+                    if cameraSubject then
+                        Camera.CameraType = Enum.CameraType.Custom
+                        Camera.CameraSubject = cameraSubject
+                        spectatingTargetName = clickedText
+                        Library:Notify({ Title = "Spectating", Description = "Spectating: " .. targetModel.Name, Time = 2 })
+                    end
                 else
-                    Library:Notify({ Title = "Spectate Error", Description = targetPlayer.Name .. " model not found in Workspace.Live", Time = 3 })
+                    Library:Notify({ Title = "Spectate Error", Description = "Model not found in Workspace.Live: " .. clickedText, Time = 3 })
                 end
             end
         end)
@@ -382,11 +318,10 @@ SpectateGroup:AddToggle('LeaderboardSpectateToggle', {
         if not Value then resetSpectateCamera() end
     end
 })
-
 SpectateGroup:AddButton({ Text = 'Reset Camera', Func = resetSpectateCamera })
 
 --------------------------------------------------------------------------------
--- 6. ADVANCED PLAYER BOX ESP (CULLED & OPTIMIZED)
+-- 6. ADVANCED PLAYER BOX ESP
 --------------------------------------------------------------------------------
 local boxEspEnabled = false
 local boxEspColor = Color3.fromRGB(0, 255, 140)
@@ -469,91 +404,107 @@ PlayerEspGroup:AddToggle('PlayerBoxEspToggle', {
 })
 
 --------------------------------------------------------------------------------
--- 7. TRINKET ESP & AUTOPICKUP LOGIC (THROTTLED & OPTIMIZED)
+-- 7. HIGH-PERFORMANCE DRAWING-BASED TRINKET ESP
 --------------------------------------------------------------------------------
 local trinketEspEnabled = false
 local trinketMaxDistance = 150
 local showCommons = true
 local showRares = true
 local showUnknowns = true
-local activeTrinketESP = {}
-
 local autoPickupEnabled = false
 
-local function createTrinketBillboard(instance)
-    if activeTrinketESP[instance] then return end
+local trinketDrawings = {}
+
+local function removeTrinketData(item)
+    if trinketDrawings[item] then
+        if trinketDrawings[item].Drawing then
+            trinketDrawings[item].Drawing:Remove()
+        end
+        trinketDrawings[item] = nil
+    end
+end
+
+local function registerTrinket(item)
+    if trinketDrawings[item] then return end
     
-    local part = instance:IsA("BasePart") and instance or instance:FindFirstChildWhichIsA("BasePart", true)
+    local part = item:IsA("BasePart") and item or item:FindFirstChildWhichIsA("BasePart", true)
     if not part then return end
 
-    local name, color, rarity = identifyTrinket(instance)
+    local name, color, rarity = identifyTrinket(item)
 
-    local billboard = Instance.new("BillboardGui")
-    billboard.Name = "TrinketESP"
-    billboard.Adornee = part
-    billboard.Size = UDim2.new(0, 50, 0, 15)
-    billboard.StudsOffset = Vector3.new(0, 1, 0)
-    billboard.AlwaysOnTop = true
-    billboard.Enabled = false
+    local textDrawing = Drawing.new("Text")
+    textDrawing.Visible = false
+    textDrawing.Text = name
+    textDrawing.Color = color
+    textDrawing.Size = 13
+    textDrawing.Center = true
+    textDrawing.Outline = true
 
-    local textLabel = Instance.new("TextLabel")
-    textLabel.Size = UDim2.new(1, 0, 1, 0)
-    textLabel.BackgroundTransparency = 1
-    textLabel.Text = name
-    textLabel.TextColor3 = color
-    textLabel.TextStrokeTransparency = 0.5
-    textLabel.TextSize = 9
-    textLabel.Font = Enum.Font.SourceSansBold
-    textLabel.Parent = billboard
+    trinketDrawings[item] = {
+        Drawing = textDrawing,
+        Part = part,
+        Rarity = rarity
+    }
 
-    billboard.Parent = part
-    activeTrinketESP[instance] = { Gui = billboard, Part = part, Rarity = rarity }
-
-    instance.AncestryChanged:Connect(function(_, parent)
-        if not parent and activeTrinketESP[instance] then
-            if activeTrinketESP[instance].Gui then activeTrinketESP[instance].Gui:Destroy() end
-            activeTrinketESP[instance] = nil
-        end
+    item.AncestryChanged:Connect(function(_, parent)
+        if not parent then removeTrinketData(item) end
     end)
 end
 
--- Dedicated 10 Hz throttled thread for Trinket ESP updates (Prevents FPS drop)
-task.spawn(function()
-    while true do
-        task.wait(0.1)
-        local liveFolder = Workspace:FindFirstChild("Live")
-        local char = LocalPlayer.Character or (liveFolder and liveFolder:FindFirstChild(LocalPlayer.Name))
-        local root = char and char:FindFirstChild("HumanoidRootPart")
+-- Ultra-light RenderStepped drawing updater
+RunService.RenderStepped:Connect(function()
+    if not trinketEspEnabled then
+        for _, data in pairs(trinketDrawings) do
+            data.Drawing.Visible = false
+        end
+        return
+    end
 
-        if trinketEspEnabled and root then
-            local rootPos = root.Position
-            for _, data in pairs(activeTrinketESP) do
-                if data and data.Gui and data.Part and data.Part.Parent then
-                    local dist = (rootPos - data.Part.Position).Magnitude
-                    
-                    local passesFilter = false
-                    if data.Rarity == "Common" and showCommons then passesFilter = true end
-                    if data.Rarity == "Rare" and showRares then passesFilter = true end
-                    if data.Rarity == "Unknown" and showUnknowns then passesFilter = true end
+    local liveFolder = Workspace:FindFirstChild("Live") or Workspace
+    local char = LocalPlayer.Character or liveFolder:FindFirstChild(LocalPlayer.Name)
+    local root = char and char:FindFirstChild("HumanoidRootPart")
 
-                    data.Gui.Enabled = passesFilter and (dist <= trinketMaxDistance)
+    if not root then
+        for _, data in pairs(trinketDrawings) do data.Drawing.Visible = false end
+        return
+    end
+
+    local rootPos = root.Position
+
+    for item, data in pairs(trinketDrawings) do
+        local part = data.Part
+        if part and part.Parent then
+            local dist = (rootPos - part.Position).Magnitude
+            
+            local passesFilter = false
+            if data.Rarity == "Common" and showCommons then passesFilter = true end
+            if data.Rarity == "Rare" and showRares then passesFilter = true end
+            if data.Rarity == "Unknown" and showUnknowns then passesFilter = true end
+
+            if passesFilter and dist <= trinketMaxDistance then
+                local screenPos, onScreen = Camera:WorldToViewportPoint(part.Position)
+                if onScreen then
+                    data.Drawing.Position = Vector2.new(screenPos.X, screenPos.Y)
+                    data.Drawing.Visible = true
+                else
+                    data.Drawing.Visible = false
                 end
+            else
+                data.Drawing.Visible = false
             end
         else
-            for _, data in pairs(activeTrinketESP) do
-                if data and data.Gui then data.Gui.Enabled = false end
-            end
+            removeTrinketData(item)
         end
     end
 end)
 
--- Dedicated 6 Hz throttled thread for Auto Pickup (Prevents frame spikes)
+-- Dedicated thread for Auto Pickup (10 Hz)
 task.spawn(function()
     while true do
-        task.wait(0.15)
+        task.wait(0.1)
         if autoPickupEnabled then
-            local liveFolder = Workspace:FindFirstChild("Live")
-            local char = LocalPlayer.Character or (liveFolder and liveFolder:FindFirstChild(LocalPlayer.Name))
+            local liveFolder = Workspace:FindFirstChild("Live") or Workspace
+            local char = LocalPlayer.Character or liveFolder:FindFirstChild(LocalPlayer.Name)
             local root = char and char:FindFirstChild("HumanoidRootPart")
             local dinketsFolder = Workspace:FindFirstChild("Dinkets")
 
@@ -561,11 +512,9 @@ task.spawn(function()
                 local rootPos = root.Position
                 for _, item in ipairs(dinketsFolder:GetChildren()) do
                     local part = item:IsA("BasePart") and item or item:FindFirstChildWhichIsA("BasePart", true)
-                    if part then
-                        if (rootPos - part.Position).Magnitude <= 20 then
-                            local clickDetector = item:FindFirstChildWhichIsA("ClickDetector", true)
-                            if clickDetector then fireclickdetector(clickDetector, 0) end
-                        end
+                    if part and (rootPos - part.Position).Magnitude <= 20 then
+                        local clickDetector = item:FindFirstChildWhichIsA("ClickDetector", true)
+                        if clickDetector then fireclickdetector(clickDetector, 0) end
                     end
                 end
             end
@@ -576,10 +525,10 @@ end)
 local function scanForTrinkets()
     local dinketsFolder = Workspace:WaitForChild("Dinkets", 10)
     if dinketsFolder then
-        for _, child in ipairs(dinketsFolder:GetChildren()) do createTrinketBillboard(child) end
+        for _, child in ipairs(dinketsFolder:GetChildren()) do registerTrinket(child) end
         dinketsFolder.ChildAdded:Connect(function(child)
             task.wait(0.1)
-            createTrinketBillboard(child)
+            registerTrinket(child)
         end)
     end
 end
