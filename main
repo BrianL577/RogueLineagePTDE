@@ -49,14 +49,17 @@ local TRINKET_DICTIONARY = {
     ["rbxassetid://5196782997"] = { Name = "Ring", Color = Color3.fromRGB(255, 255, 255), Rarity = "Common" },
     ["rbxassetid://5196577540"] = { Name = "Amulet2", Color = Color3.fromRGB(255, 255, 255), Rarity = "Common" },
     ["rbxassetid://5204003946"] = { Name = "Goblet", Color = Color3.fromRGB(255, 255, 255), Rarity = "Common" },
-    ["rbxassetid://2877143560"]  = { Name = "Ruby", Color = Color3.fromRGB(255, 255, 255), Rarity = "Common" },
+    ["rbxassetid://2877143560"] = { Name = "Ruby", Color = Color3.fromRGB(255, 255, 255), Rarity = "Common" },
     
     -- RARES (Orange)
     ["rbxassetid://30942623"]   = { Name = "Astral Shard", Color = Color3.fromRGB(255, 140, 0), Rarity = "Rare" },
     ["rbxassetid://7030942623"] = { Name = "Shard", Color = Color3.fromRGB(255, 140, 0), Rarity = "Rare" },
 
+    -- ULTRA RARES (Red)
+    ["rbxassetid://4027112893"] = { Name = "Arcane Tome", Color = Color3.fromRGB(255, 50, 50), Rarity = "Ultra Rare" },
+    ["rbxassetid://1536547385"] = { Name = "Mysterious Artifact", Color = Color3.fromRGB(255, 50, 50), Rarity = "Ultra Rare" },
+
     -- MISC / SPECIAL
-    ["rbxassetid://4027112893"] = { Name = "Particle", Color = Color3.fromRGB(255, 255, 255), Rarity = "Common" },
     ["rbxassetid://2520762076"] = { Name = "Howler Friend", Color = Color3.fromRGB(255, 255, 255), Rarity = "Common" },
 }
 
@@ -71,6 +74,12 @@ local function identifyTrinket(instance)
         local specialMesh = instance:FindFirstChildWhichIsA("SpecialMesh", true)
         if specialMesh then
             meshId = specialMesh.MeshId
+        else
+            -- Check for ParticleEmitter/Attachment texture ID overrides (e.g. Mysterious Artifact)
+            local particle = instance:FindFirstChildWhichIsA("ParticleEmitter", true)
+            if particle then
+                meshId = particle.Texture
+            end
         end
     end
 
@@ -275,7 +284,6 @@ local function hookLeaderboardSpectate()
 
                 local targetUser = nil
 
-                -- 1. Try to find player object matching DisplayName or Username
                 for _, player in ipairs(Players:GetPlayers()) do
                     if string.find(rawText, player.Name, 1, true) or string.find(rawText, player.DisplayName, 1, true) then
                         targetUser = player.Name
@@ -283,11 +291,9 @@ local function hookLeaderboardSpectate()
                     end
                 end
 
-                -- 2. If no direct player match, check if raw string matches any folder directly in Workspace.Live
                 local liveFolder = Workspace:FindFirstChild("Live") or Workspace
                 local targetInstance = targetUser and liveFolder:FindFirstChild(targetUser) or liveFolder:FindFirstChild(rawText)
 
-                -- 3. Fallback: Search all children inside Workspace.Live for partial name matches
                 if not targetInstance then
                     local lowerText = string.lower(rawText)
                     for _, child in ipairs(liveFolder:GetChildren()) do
@@ -300,7 +306,6 @@ local function hookLeaderboardSpectate()
                 end
 
                 if targetInstance then
-                    -- Search recursively inside the folder/model for a Humanoid or HumanoidRootPart
                     local cameraSubject = targetInstance:FindFirstChildWhichIsA("Humanoid", true) or targetInstance:FindFirstChild("HumanoidRootPart", true)
                     
                     if cameraSubject then
@@ -423,6 +428,7 @@ local trinketEspEnabled = false
 local trinketMaxDistance = 150
 local showCommons = true
 local showRares = true
+local showUltraRares = true
 local showUnknowns = true
 local autoPickupEnabled = false
 
@@ -464,7 +470,6 @@ local function registerTrinket(item)
     end)
 end
 
--- Ultra-light RenderStepped drawing updater
 RunService.RenderStepped:Connect(function()
     if not trinketEspEnabled then
         for _, data in pairs(trinketDrawings) do
@@ -492,6 +497,7 @@ RunService.RenderStepped:Connect(function()
             local passesFilter = false
             if data.Rarity == "Common" and showCommons then passesFilter = true end
             if data.Rarity == "Rare" and showRares then passesFilter = true end
+            if data.Rarity == "Ultra Rare" and showUltraRares then passesFilter = true end
             if data.Rarity == "Unknown" and showUnknowns then passesFilter = true end
 
             if passesFilter and dist <= trinketMaxDistance then
@@ -511,7 +517,7 @@ RunService.RenderStepped:Connect(function()
     end
 end)
 
--- Dedicated thread for Auto Pickup (10 Hz)
+-- Dedicated thread for Auto Pickup (Throttled to max 10 collections per second)
 task.spawn(function()
     while true do
         task.wait(0.1)
@@ -523,11 +529,18 @@ task.spawn(function()
 
             if root and dinketsFolder then
                 local rootPos = root.Position
+                local collectedThisCycle = 0
+
                 for _, item in ipairs(dinketsFolder:GetChildren()) do
+                    if collectedThisCycle >= 1 then break end
+                    
                     local part = item:IsA("BasePart") and item or item:FindFirstChildWhichIsA("BasePart", true)
                     if part and (rootPos - part.Position).Magnitude <= 20 then
                         local clickDetector = item:FindFirstChildWhichIsA("ClickDetector", true)
-                        if clickDetector then fireclickdetector(clickDetector, 0) end
+                        if clickDetector then 
+                            fireclickdetector(clickDetector, 0)
+                            collectedThisCycle = collectedThisCycle + 1
+                        end
                     end
                 end
             end
@@ -551,7 +564,8 @@ WorldEspGroup:AddToggle('TrinketEspToggle', { Text = 'Enable Trinket ESP', Defau
 WorldEspGroup:AddSlider('TrinketEspDistance', { Text = 'Trinket ESP Distance', Default = 150, Min = 10, Max = 500, Rounding = 0, Callback = function(V) trinketMaxDistance = V end })
 WorldEspGroup:AddToggle('ShowCommonsToggle', { Text = 'Show Common Trinkets', Default = true, Callback = function(V) showCommons = V end })
 WorldEspGroup:AddToggle('ShowRaresToggle', { Text = 'Show Rare Trinkets (Orange)', Default = true, Callback = function(V) showRares = V end })
-WorldEspGroup:AddToggle('ShowUnknownsToggle', { Text = 'Show Unknown Trinkets (Red)', Default = true, Callback = function(V) showUnknowns = V end })
+WorldEspGroup:AddToggle('ShowUltraRaresToggle', { Text = 'Show Ultra Rare Trinkets (Red)', Default = true, Callback = function(V) showUltraRares = V end })
+WorldEspGroup:AddToggle('ShowUnknownsToggle', { Text = 'Show Unknown Trinkets', Default = true, Callback = function(V) showUnknowns = V end })
 
 local AutoPickupToggle = WorldEspGroup:AddToggle('AutoPickupToggle', {
     Text = 'Auto Pickup (20 Studs)', Default = false,
