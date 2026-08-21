@@ -315,7 +315,7 @@ LightingGroup:AddToggle('AlwaysNightToggle', {
 })
 
 --------------------------------------------------------------------------------
--- 5. LEADERBOARD SPECTATE SYSTEM
+-- 5. LEADERBOARD SPECTATE SYSTEM (RP NAME RESOLUTION)
 --------------------------------------------------------------------------------
 local spectateEnabled = true
 local spectatingPlayerName = nil
@@ -324,9 +324,32 @@ local function resetSpectateCamera()
     local char = LocalPlayer.Character or (Workspace:FindFirstChild("Live") and Workspace.Live:FindFirstChild(LocalPlayer.Name))
     local hum = char and char:FindFirstChildWhichIsA("Humanoid")
     if hum then
+        Camera.CameraType = Enum.CameraType.Custom
         Camera.CameraSubject = hum
     end
     spectatingPlayerName = nil
+end
+
+-- Helper function to resolve a character name ("FirstName LastName") to a Player instance
+local function getPlayerFromRPName(rpName)
+    local cleanRPName = string.lower(string.gsub(rpName, "^%s*(.-)%s*$", "%1"))
+
+    for _, player in ipairs(Players:GetPlayers()) do
+        -- Check ValueObjects or Attributes under the Player
+        local firstNameVal = player:FindFirstChild("FirstName", true) or player:FindFirstChild("FirstName")
+        local lastNameVal = player:FindFirstChild("LastName", true) or player:FindFirstChild("LastName")
+
+        local firstName = firstNameVal and tostring(firstNameVal.Value or firstNameVal) or ""
+        local lastName = lastNameVal and tostring(lastNameVal.Value or lastNameVal) or ""
+        
+        local constructedName = string.lower(string.format("%s %s", firstName, lastName))
+        
+        -- Fallback check for single names or exact username matches
+        if constructedName == cleanRPName or string.lower(firstName) == cleanRPName or string.lower(player.Name) == cleanRPName then
+            return player
+        end
+    end
+    return nil
 end
 
 local function hookLeaderboardSpectate()
@@ -336,7 +359,10 @@ local function hookLeaderboardSpectate()
     local leaderboardGui = playerGui:WaitForChild("LeaderboardGui", 10)
     if not leaderboardGui then return end
     
-    local scrollFrame = leaderboardGui:WaitForChild("MainFrame", 10):WaitForChild("ScrollingFrame", 10)
+    local mainFrame = leaderboardGui:WaitForChild("MainFrame", 10)
+    if not mainFrame then return end
+
+    local scrollFrame = mainFrame:WaitForChild("ScrollingFrame", 10)
     if not scrollFrame then return end
 
     local function setupEntry(entry)
@@ -344,28 +370,45 @@ local function hookLeaderboardSpectate()
         
         local function bindInput(targetGui)
             targetGui.InputBegan:Connect(function(input)
-                if (input.UserInputType == Enum.UserInputType.MouseButton2 or input.UserInputType == Enum.UserInputType.MouseButton1) and spectateEnabled then
+                -- Explicit Right-Click Check
+                if input.UserInputType == Enum.UserInputType.MouseButton2 and spectateEnabled then
                     local label = entry:FindFirstChildWhichIsA("TextLabel", true) or (entry:IsA("TextLabel") and entry)
                     if not label then return end
                     
-                    local nameText = label.Text
+                    local rpNameText = label.Text
+                    if rpNameText == "" then return end
                     
-                    if spectatingPlayerName == nameText then
+                    -- Handle toggle off if clicking the same targeted player
+                    if spectatingPlayerName == rpNameText then
                         resetSpectateCamera()
+                        Library:Notify({ Title = "Spectate", Description = "Reset camera to self", Time = 2 })
                         return
                     end
 
-                    local targetChar = (Workspace:FindFirstChild("Live") and Workspace.Live:FindFirstChild(nameText)) 
-                        or Workspace:FindFirstChild(nameText)
-                        or (Workspace:FindFirstChild("Dead") and Workspace.Dead:FindFirstChild(nameText))
+                    -- Resolve RP Name to Player Instance
+                    local targetPlayer = getPlayerFromRPName(rpNameText)
+                    if not targetPlayer then
+                        Library:Notify({ Title = "Spectate Error", Description = "Could not resolve RP name: " .. rpNameText, Time = 3 })
+                        return
+                    end
+
+                    -- Search Workspace/Live using the resolved Roblox Username
+                    local liveFolder = Workspace:FindFirstChild("Live") or Workspace
+                    local targetChar = liveFolder:FindFirstChild(targetPlayer.Name)
                     
                     if targetChar then
-                        local hum = targetChar:FindFirstChildWhichIsA("Humanoid") or targetChar:FindFirstChild("HumanoidRootPart")
-                        if hum then
-                            Camera.CameraSubject = hum
-                            spectatingPlayerName = nameText
-                            Library:Notify({ Title = "Spectating", Description = "Now spectating: " .. nameText, Time = 2 })
+                        local hrp = targetChar:FindFirstChild("HumanoidRootPart")
+                        local hum = targetChar:FindFirstChildWhichIsA("Humanoid")
+                        local cameraSubject = hum or hrp
+
+                        if cameraSubject then
+                            Camera.CameraType = Enum.CameraType.Custom
+                            Camera.CameraSubject = cameraSubject
+                            spectatingPlayerName = rpNameText
+                            Library:Notify({ Title = "Spectating", Description = "Spectating: " .. rpNameText .. " (" .. targetPlayer.Name .. ")", Time = 3 })
                         end
+                    else
+                        Library:Notify({ Title = "Spectate Error", Description = targetPlayer.Name .. " is not alive in Workspace.Live", Time = 3 })
                     end
                 end
             end)
@@ -373,11 +416,15 @@ local function hookLeaderboardSpectate()
 
         bindInput(entry)
         for _, descendant in ipairs(entry:GetDescendants()) do
-            if descendant:IsA("GuiObject") then bindInput(descendant) end
+            if descendant:IsA("GuiObject") then 
+                bindInput(descendant) 
+            end
         end
     end
 
-    for _, child in ipairs(scrollFrame:GetChildren()) do setupEntry(child) end
+    for _, child in ipairs(scrollFrame:GetChildren()) do 
+        setupEntry(child) 
+    end
     scrollFrame.ChildAdded:Connect(setupEntry)
 end
 
@@ -385,7 +432,7 @@ task.spawn(hookLeaderboardSpectate)
 
 SpectateGroup:AddToggle('LeaderboardSpectateToggle', {
     Text = 'Leaderboard Spectate',
-    Tooltip = 'Click player names on leaderboard list to spectate',
+    Tooltip = 'Right-click player labels on leaderboard to spectate HRP in Workspace.Live',
     Default = true,
     Callback = function(Value)
         spectateEnabled = Value
@@ -399,7 +446,6 @@ SpectateGroup:AddButton({
         resetSpectateCamera()
     end
 })
-
 --------------------------------------------------------------------------------
 -- 6. ADVANCED PLAYER BOX ESP
 --------------------------------------------------------------------------------
