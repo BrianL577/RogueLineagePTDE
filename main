@@ -1,0 +1,789 @@
+loadstring(game:HttpGet("https://raw.githubusercontent.com/BigBoyTimme/New.Loadstring.Scripts/refs/heads/main/Dex.Explorer"))()
+
+local repo = "https://raw.githubusercontent.com/deividcomsono/Obsidian/main/"
+local Library = loadstring(game:HttpGet(repo .. "Library.lua"))()
+local ThemeManager = loadstring(game:HttpGet(repo .. "addons/ThemeManager.lua"))()
+local SaveManager = loadstring(game:HttpGet(repo .. "addons/SaveManager.lua"))()
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local Workspace = game:GetService("Workspace")
+local Lighting = game:GetService("Lighting")
+
+local LocalPlayer = Players.LocalPlayer
+local Camera = Workspace.CurrentCamera
+
+--------------------------------------------------------------------------------
+-- UI SETUP
+--------------------------------------------------------------------------------
+local Window = Library:CreateWindow({
+    Title = "Embark Utility",
+    Footer = "Flight, ESP, Spectate & Night",
+    Icon = 0,
+    NotifySide = "Right",
+    ShowCustomCursor = true,
+})
+
+local Tabs = {
+    Movement = Window:AddTab("Movement", "user"),
+    Visuals = Window:AddTab("Visuals", "eye"),
+    ["UI Settings"] = Window:AddTab("UI Settings", "settings"),
+}
+
+local MovementGroup = Tabs.Movement:AddLeftGroupbox("Flight Controls")
+local PhysicsGroup = Tabs.Movement:AddRightGroupbox("Physics & Speed")
+local PlayerEspGroup = Tabs.Visuals:AddLeftGroupbox("Player ESP")
+local SpectateGroup = Tabs.Visuals:AddRightGroupbox("Spectate")
+local LightingGroup = Tabs.Visuals:AddRightGroupbox("Lighting Controls")
+local WorldEspGroup = Tabs.Visuals:AddRightGroupbox("World ESP")
+
+--------------------------------------------------------------------------------
+-- TRINKET DICTIONARY & ID SCRAPER
+--------------------------------------------------------------------------------
+local TRINKET_DICTIONARY = {
+    -- COMMONS (White)
+    ["rbxassetid://5204453430"] = { Name = "Scroll", Color = Color3.fromRGB(255, 255, 255), Rarity = "Common" },
+    ["rbxassetid://5196551436"] = { Name = "Amulet/Opal", Color = Color3.fromRGB(255, 255, 255), Rarity = "Common" },
+    ["rbxassetid://5196776695"] = { Name = "Ring", Color = Color3.fromRGB(255, 255, 255), Rarity = "Common" },
+    ["rbxassetid://5196782997"] = { Name = "Ring", Color = Color3.fromRGB(255, 255, 255), Rarity = "Common" },
+    ["rbxassetid://5196577540"] = { Name = "Amulet2", Color = Color3.fromRGB(255, 255, 255), Rarity = "Common" },
+    ["rbxassetid://5204003946"] = { Name = "Goblet", Color = Color3.fromRGB(255, 255, 255), Rarity = "Common" },
+    ["rbxassetid://2877143560"]  = { Name = "Ruby", Color = Color3.fromRGB(255, 255, 255), Rarity = "Common" },
+    
+    -- RARES (Orange)
+    ["rbxassetid://30942623"]   = { Name = "Astral Shard", Color = Color3.fromRGB(255, 140, 0), Rarity = "Rare" },
+    ["rbxassetid://7030942623"] = { Name = "Shard", Color = Color3.fromRGB(255, 140, 0), Rarity = "Rare" },
+
+    -- MISC / SPECIAL
+    ["rbxassetid://4027112893"] = { Name = "Particle", Color = Color3.fromRGB(255, 255, 255), Rarity = "Common" },
+    ["rbxassetid://2520762076"] = { Name = "Howler Friend", Color = Color3.fromRGB(255, 255, 255), Rarity = "Common" },
+}
+
+local unknownMeshIDs = {}
+
+local function identifyTrinket(instance)
+    local meshId = ""
+    
+    if instance:IsA("MeshPart") then
+        meshId = instance.MeshId
+    else
+        local specialMesh = instance:FindFirstChildWhichIsA("SpecialMesh", true)
+        if specialMesh then
+            meshId = specialMesh.MeshId
+        end
+    end
+
+    -- Clean up ID formatting strings
+    meshId = string.gsub(meshId, "%%20", "")
+    meshId = string.gsub(meshId, "%s+", "")
+
+    if TRINKET_DICTIONARY[meshId] then
+        local item = TRINKET_DICTIONARY[meshId]
+        return item.Name, item.Color, item.Rarity
+    elseif meshId ~= "" then
+        if not unknownMeshIDs[meshId] then
+            unknownMeshIDs[meshId] = true
+            print("[UNKNOWN TRINKET DETECTED] Item:", instance:GetFullName(), "| MeshID:", meshId)
+        end
+        return "Unknown (" .. string.sub(meshId, -8) .. ")", Color3.fromRGB(255, 50, 50), "Unknown"
+    end
+
+    return "Trinket", Color3.fromRGB(255, 255, 255), "Common"
+end
+
+--------------------------------------------------------------------------------
+-- 1. FLIGHT LOGIC
+--------------------------------------------------------------------------------
+local flying = false
+local flySpeed = 50
+
+local function fly()
+    while flying do
+        local character = LocalPlayer.Character
+        local root = character and character:FindFirstChild("HumanoidRootPart")
+        
+        if root then
+            local moveDirection = Vector3.new()
+            local cameraCFrame = Camera.CFrame
+            local isMoving = false
+
+            if UserInputService:IsKeyDown(Enum.KeyCode.W) then
+                moveDirection = moveDirection + cameraCFrame.LookVector
+                isMoving = true
+            end
+            if UserInputService:IsKeyDown(Enum.KeyCode.S) then
+                moveDirection = moveDirection - cameraCFrame.LookVector
+                isMoving = true
+            end
+            if UserInputService:IsKeyDown(Enum.KeyCode.A) then
+                moveDirection = moveDirection - cameraCFrame.RightVector
+                isMoving = true
+            end
+            if UserInputService:IsKeyDown(Enum.KeyCode.D) then
+                moveDirection = moveDirection + cameraCFrame.RightVector
+                isMoving = true
+            end
+            if UserInputService:IsKeyDown(Enum.KeyCode.Space) then
+                moveDirection = moveDirection + Vector3.new(0, 1, 0)
+                isMoving = true
+            end
+
+            if isMoving and moveDirection.Magnitude > 0 then
+                root.AssemblyLinearVelocity = moveDirection.Unit * flySpeed
+            else
+                root.AssemblyLinearVelocity = Vector3.zero
+            end
+        end
+
+        RunService.RenderStepped:Wait()
+    end
+end
+
+local FlyToggle = MovementGroup:AddToggle('FlyToggle', {
+    Text = 'Fly',
+    Tooltip = 'Fly around the map',
+    Default = false,
+    Callback = function(Value)
+        flying = Value
+        if flying then
+            task.spawn(fly)
+        else
+            local character = LocalPlayer.Character
+            local root = character and character:FindFirstChild("HumanoidRootPart")
+            if root then
+                root.AssemblyLinearVelocity = Vector3.zero
+            end
+        end
+    end
+})
+
+FlyToggle:AddKeyPicker("FlyKeybind", {
+    Default = "LeftAlt",
+    SyncToggleState = true,
+    Mode = "Toggle",
+    Text = "Fly Keybind",
+    NoUI = false,
+})
+
+MovementGroup:AddSlider('FlySpeed', {
+    Text = 'Fly Speed',
+    Default = 50,
+    Min = 10,
+    Max = 300,
+    Rounding = 0,
+    Tooltip = 'Adjust flying velocity',
+    Callback = function(Value)
+        flySpeed = Value
+    end
+})
+
+--------------------------------------------------------------------------------
+-- 2. NOCLIP LOGIC
+--------------------------------------------------------------------------------
+local noclip = false
+local noclipConnection = nil
+
+local NoClipToggle = PhysicsGroup:AddToggle('NoClipToggle', {
+    Text = 'NoClip',
+    Tooltip = 'Walk through walls and obstacles',
+    Default = false,
+    Callback = function(Value)
+        noclip = Value
+        if noclipConnection then
+            noclipConnection:Disconnect()
+            noclipConnection = nil
+        end
+        
+        if noclip then
+            noclipConnection = RunService.Stepped:Connect(function()
+                local character = LocalPlayer.Character
+                if character then
+                    for _, part in ipairs(character:GetDescendants()) do
+                        if part:IsA("BasePart") then
+                            part.CanCollide = false
+                        end
+                    end
+                end
+            end)
+        end
+    end
+})
+
+NoClipToggle:AddKeyPicker("NoClipKeybind", {
+    Default = "KeypadPlus",
+    SyncToggleState = true,
+    Mode = "Toggle",
+    Text = "NoClip Keybind",
+    NoUI = false,
+})
+
+--------------------------------------------------------------------------------
+-- 3. REMOTE DESTRUCTION NOFALL LOGIC
+--------------------------------------------------------------------------------
+local noFallRemoteEnabled = false
+local noFallScanConnection = nil
+
+local function destroyFallDamageRemote(character)
+    if not character then return end
+    
+    local charHandler = character:WaitForChild("CharacterHandler", 2)
+    if charHandler then
+        local remotes = charHandler:WaitForChild("Remotes", 2)
+        if remotes then
+            local fallRemote = remotes:FindFirstChild("ApplyFallDamage")
+            if fallRemote then
+                fallRemote:Destroy()
+            end
+            
+            remotes.ChildAdded:Connect(function(child)
+                if noFallRemoteEnabled and child.Name == "ApplyFallDamage" then
+                    child:Destroy()
+                end
+            end)
+        end
+    end
+end
+
+PhysicsGroup:AddToggle('NoFallRemoteToggle', {
+    Text = 'No Fall (Destroy Remote)',
+    Tooltip = 'Deletes ApplyFallDamage remote from CharacterHandler',
+    Default = false,
+    Callback = function(Value)
+        noFallRemoteEnabled = Value
+        
+        if noFallRemoteEnabled then
+            for _, folderName in ipairs({"Live", "Dead"}) do
+                local folder = Workspace:FindFirstChild(folderName)
+                if folder then
+                    local char = folder:FindFirstChild(LocalPlayer.Name)
+                    if char then destroyFallDamageRemote(char) end
+                end
+            end
+            
+            noFallScanConnection = RunService.Heartbeat:Connect(function()
+                for _, folderName in ipairs({"Live", "Dead"}) do
+                    local folder = Workspace:FindFirstChild(folderName)
+                    if folder then
+                        local char = folder:FindFirstChild(LocalPlayer.Name)
+                        if char then
+                            local remote = char:FindFirstChild("CharacterHandler") and char.CharacterHandler:FindFirstChild("Remotes") and char.CharacterHandler.Remotes:FindFirstChild("ApplyFallDamage")
+                            if remote then remote:Destroy() end
+                        end
+                    end
+                end
+            end)
+        else
+            if noFallScanConnection then
+                noFallScanConnection:Disconnect()
+                noFallScanConnection = nil
+            end
+        end
+    end
+})
+
+--------------------------------------------------------------------------------
+-- 4. CLIENT-SIDE ALWAYS NIGHT LOGIC
+--------------------------------------------------------------------------------
+local alwaysNightEnabled = false
+local nightConnection = nil
+local originalClockTime = Lighting.ClockTime
+
+LightingGroup:AddToggle('AlwaysNightToggle', {
+    Text = 'Always Night',
+    Tooltip = 'Forces local client lighting to midnight (00:00)',
+    Default = false,
+    Callback = function(Value)
+        alwaysNightEnabled = Value
+        
+        if alwaysNightEnabled then
+            originalClockTime = Lighting.ClockTime
+            Lighting.ClockTime = 0
+            
+            nightConnection = RunService.RenderStepped:Connect(function()
+                if alwaysNightEnabled and Lighting.ClockTime ~= 0 then
+                    Lighting.ClockTime = 0
+                end
+            end)
+        else
+            if nightConnection then
+                nightConnection:Disconnect()
+                nightConnection = nil
+            end
+            Lighting.ClockTime = originalClockTime
+        end
+    end
+})
+
+--------------------------------------------------------------------------------
+-- 5. LEADERBOARD SPECTATE SYSTEM
+--------------------------------------------------------------------------------
+local spectateEnabled = true
+local spectatingPlayerName = nil
+
+local function resetSpectateCamera()
+    local char = LocalPlayer.Character or (Workspace:FindFirstChild("Live") and Workspace.Live:FindFirstChild(LocalPlayer.Name))
+    local hum = char and char:FindFirstChildWhichIsA("Humanoid")
+    if hum then
+        Camera.CameraSubject = hum
+    end
+    spectatingPlayerName = nil
+end
+
+local function hookLeaderboardSpectate()
+    local playerGui = LocalPlayer:WaitForChild("PlayerGui", 10)
+    if not playerGui then return end
+    
+    local leaderboardGui = playerGui:WaitForChild("LeaderboardGui", 10)
+    if not leaderboardGui then return end
+    
+    local scrollFrame = leaderboardGui:WaitForChild("MainFrame", 10):WaitForChild("ScrollingFrame", 10)
+    if not scrollFrame then return end
+
+    local function setupEntry(entry)
+        if not entry:IsA("GuiObject") then return end
+        
+        local function bindInput(targetGui)
+            targetGui.InputBegan:Connect(function(input)
+                if (input.UserInputType == Enum.UserInputType.MouseButton2 or input.UserInputType == Enum.UserInputType.MouseButton1) and spectateEnabled then
+                    local label = entry:FindFirstChildWhichIsA("TextLabel", true) or (entry:IsA("TextLabel") and entry)
+                    if not label then return end
+                    
+                    local nameText = label.Text
+                    
+                    if spectatingPlayerName == nameText then
+                        resetSpectateCamera()
+                        return
+                    end
+
+                    local targetChar = (Workspace:FindFirstChild("Live") and Workspace.Live:FindFirstChild(nameText)) 
+                        or Workspace:FindFirstChild(nameText)
+                        or (Workspace:FindFirstChild("Dead") and Workspace.Dead:FindFirstChild(nameText))
+                    
+                    if targetChar then
+                        local hum = targetChar:FindFirstChildWhichIsA("Humanoid") or targetChar:FindFirstChild("HumanoidRootPart")
+                        if hum then
+                            Camera.CameraSubject = hum
+                            spectatingPlayerName = nameText
+                            Library:Notify({ Title = "Spectating", Description = "Now spectating: " .. nameText, Time = 2 })
+                        end
+                    end
+                end
+            end)
+        end
+
+        bindInput(entry)
+        for _, descendant in ipairs(entry:GetDescendants()) do
+            if descendant:IsA("GuiObject") then bindInput(descendant) end
+        end
+    end
+
+    for _, child in ipairs(scrollFrame:GetChildren()) do setupEntry(child) end
+    scrollFrame.ChildAdded:Connect(setupEntry)
+end
+
+task.spawn(hookLeaderboardSpectate)
+
+SpectateGroup:AddToggle('LeaderboardSpectateToggle', {
+    Text = 'Leaderboard Spectate',
+    Tooltip = 'Click player names on leaderboard list to spectate',
+    Default = true,
+    Callback = function(Value)
+        spectateEnabled = Value
+        if not Value then resetSpectateCamera() end
+    end
+})
+
+SpectateGroup:AddButton({
+    Text = 'Reset Camera',
+    Func = function()
+        resetSpectateCamera()
+    end
+})
+
+--------------------------------------------------------------------------------
+-- 6. ADVANCED PLAYER BOX ESP
+--------------------------------------------------------------------------------
+local boxEspEnabled = false
+local boxEspColor = Color3.fromRGB(0, 255, 140)
+local espObjects = {}
+
+local function getPlayerClass(player, character)
+    if not character then return "None" end
+    local classAttr = character:GetAttribute("Class") or character:GetAttribute("Archetype") or player:GetAttribute("Class")
+    if classAttr then return tostring(classAttr) end
+    
+    local classVal = character:FindFirstChild("Class") or character:FindFirstChild("Archetype")
+    if classVal and (classVal:IsA("StringValue") or classVal:IsA("ObjectValue")) then
+        return tostring(classVal.Value)
+    end
+    return "Unknown"
+end
+
+local function createEspDrawing(player)
+    if player == LocalPlayer then return end
+
+    local box = Drawing.new("Square")
+    box.Visible = false
+    box.Color = boxEspColor
+    box.Thickness = 1.5
+    box.Filled = false
+    box.Transparency = 1
+
+    local nameText = Drawing.new("Text")
+    nameText.Visible = false
+    nameText.Color = Color3.fromRGB(255, 255, 255)
+    nameText.Size = 14
+    nameText.Center = true
+    nameText.Outline = true
+
+    local hpText = Drawing.new("Text")
+    hpText.Visible = false
+    hpText.Size = 13
+    hpText.Center = true
+    hpText.Outline = true
+
+    local classText = Drawing.new("Text")
+    classText.Visible = false
+    classText.Color = Color3.fromRGB(255, 200, 50)
+    classText.Size = 12
+    classText.Center = true
+    classText.Outline = true
+
+    espObjects[player] = { Box = box, Name = nameText, HP = hpText, Class = classText }
+end
+
+for _, player in ipairs(Players:GetPlayers()) do createEspDrawing(player) end
+Players.PlayerAdded:Connect(createEspDrawing)
+
+Players.PlayerRemoving:Connect(function(player)
+    if espObjects[player] then
+        espObjects[player].Box:Remove()
+        espObjects[player].Name:Remove()
+        espObjects[player].HP:Remove()
+        espObjects[player].Class:Remove()
+        espObjects[player] = nil
+    end
+end)
+
+RunService.RenderStepped:Connect(function()
+    if not boxEspEnabled then
+        for _, esp in pairs(espObjects) do
+            esp.Box.Visible = false
+            esp.Name.Visible = false
+            esp.HP.Visible = false
+            esp.Class.Visible = false
+        end
+        return
+    end
+
+    for player, esp in pairs(espObjects) do
+        local character = player.Character or (Workspace:FindFirstChild("Live") and Workspace.Live:FindFirstChild(player.Name))
+        local root = character and character:FindFirstChild("HumanoidRootPart")
+        local humanoid = character and character:FindFirstChildWhichIsA("Humanoid")
+
+        if character and root and humanoid and humanoid.Health > 0 then
+            local position, onScreen = Camera:WorldToViewportPoint(root.Position)
+
+            if onScreen then
+                local head = character:FindFirstChild("Head")
+                local headPos = head and Camera:WorldToViewportPoint(head.Position + Vector3.new(0, 0.5, 0)) or Camera:WorldToViewportPoint(root.Position + Vector3.new(0, 3, 0))
+                local legPos = Camera:WorldToViewportPoint(root.Position - Vector3.new(0, 3, 0))
+
+                local height = math.abs(headPos.Y - legPos.Y)
+                local width = height / 1.5
+
+                local boxX = position.X - width / 2
+                local boxY = position.Y - height / 2
+
+                esp.Box.Size = Vector2.new(width, height)
+                esp.Box.Position = Vector2.new(boxX, boxY)
+                esp.Box.Color = boxEspColor
+                esp.Box.Visible = true
+
+                esp.Name.Text = player.Name
+                esp.Name.Position = Vector2.new(position.X, boxY - 16)
+                esp.Name.Visible = true
+
+                local currentHp = math.floor(humanoid.Health)
+                local maxHp = math.floor(humanoid.MaxHealth)
+                esp.HP.Text = string.format("HP: %d/%d", currentHp, maxHp)
+                esp.HP.Position = Vector2.new(position.X, boxY + height + 2)
+                
+                local hpPercent = math.clamp(currentHp / (maxHp > 0 and maxHp or 1), 0, 1)
+                esp.HP.Color = Color3.fromRGB(255 * (1 - hpPercent), 255 * hpPercent, 0)
+                esp.HP.Visible = true
+
+                local className = getPlayerClass(player, character)
+                esp.Class.Text = "[" .. className .. "]"
+                esp.Class.Position = Vector2.new(position.X, boxY + height + 16)
+                esp.Class.Visible = true
+            else
+                esp.Box.Visible = false
+                esp.Name.Visible = false
+                esp.HP.Visible = false
+                esp.Class.Visible = false
+            end
+        else
+            esp.Box.Visible = false
+            esp.Name.Visible = false
+            esp.HP.Visible = false
+            esp.Class.Visible = false
+        end
+    end
+end)
+
+PlayerEspGroup:AddToggle('PlayerBoxEspToggle', {
+    Text = 'Enable Player Box ESP',
+    Tooltip = 'Renders 2D box with Username, HP, and Class info',
+    Default = false,
+    Callback = function(Value)
+        boxEspEnabled = Value
+    end
+}):AddColorPicker('PlayerBoxEspColor', {
+    Default = Color3.fromRGB(0, 255, 140),
+    Title = 'Box ESP Color',
+    Callback = function(Value)
+        boxEspColor = Value
+    end
+})
+
+--------------------------------------------------------------------------------
+-- 7. TRINKET ESP & FILTERED AUTOPICKUP LOGIC
+--------------------------------------------------------------------------------
+local trinketEspEnabled = false
+local trinketMaxDistance = 150
+local showCommons = true
+local showRares = true
+local showUnknowns = true
+local activeTrinketESP = {}
+
+local autoPickupEnabled = false
+local autoPickupConnection = nil
+
+local function createTrinketBillboard(instance)
+    if activeTrinketESP[instance] then return end
+    
+    local part = instance:IsA("BasePart") and instance or instance:FindFirstChildWhichIsA("BasePart", true)
+    if not part then return end
+
+    local name, color, rarity = identifyTrinket(instance)
+
+    local billboard = Instance.new("BillboardGui")
+    billboard.Name = "TrinketESP"
+    billboard.Adornee = part
+    billboard.Size = UDim2.new(0, 50, 0, 15)
+    billboard.StudsOffset = Vector3.new(0, 1, 0)
+    billboard.AlwaysOnTop = true
+    billboard.Enabled = false
+
+    local textLabel = Instance.new("TextLabel")
+    textLabel.Size = UDim2.new(1, 0, 1, 0)
+    textLabel.BackgroundTransparency = 1
+    textLabel.Text = name
+    textLabel.TextColor3 = color
+    textLabel.TextStrokeTransparency = 0.5
+    textLabel.TextSize = 9
+    textLabel.TextScaled = false
+    textLabel.Font = Enum.Font.SourceSansBold
+    textLabel.Parent = billboard
+
+    billboard.Parent = part
+    activeTrinketESP[instance] = { Gui = billboard, Part = part, Rarity = rarity }
+
+    instance.AncestryChanged:Connect(function(_, parent)
+        if not parent and activeTrinketESP[instance] then
+            if activeTrinketESP[instance].Gui then
+                activeTrinketESP[instance].Gui:Destroy()
+            end
+            activeTrinketESP[instance] = nil
+        end
+    end)
+end
+
+-- Render loop for dynamic ESP distance & rarity filter check
+RunService.RenderStepped:Connect(function()
+    local char = LocalPlayer.Character or (Workspace:FindFirstChild("Live") and Workspace.Live:FindFirstChild(LocalPlayer.Name))
+    local root = char and char:FindFirstChild("HumanoidRootPart")
+
+    if not trinketEspEnabled or not root then
+        for _, data in pairs(activeTrinketESP) do
+            if data and data.Gui then data.Gui.Enabled = false end
+        end
+        return
+    end
+
+    for _, data in pairs(activeTrinketESP) do
+        if data and data.Gui and data.Part and data.Part.Parent then
+            local dist = (root.Position - data.Part.Position).Magnitude
+            
+            local passesFilter = false
+            if data.Rarity == "Common" and showCommons then passesFilter = true end
+            if data.Rarity == "Rare" and showRares then passesFilter = true end
+            if data.Rarity == "Unknown" and showUnknowns then passesFilter = true end
+
+            data.Gui.Enabled = passesFilter and (dist <= trinketMaxDistance)
+        end
+    end
+end)
+
+local function scanForTrinkets()
+    local dinketsFolder = Workspace:WaitForChild("Dinkets", 10)
+    if dinketsFolder then
+        for _, child in ipairs(dinketsFolder:GetChildren()) do
+            createTrinketBillboard(child)
+        end
+        dinketsFolder.ChildAdded:Connect(function(child)
+            task.wait(0.1)
+            createTrinketBillboard(child)
+        end)
+    end
+end
+
+task.spawn(scanForTrinkets)
+
+WorldEspGroup:AddToggle('TrinketEspToggle', {
+    Text = 'Enable Trinket ESP',
+    Tooltip = 'Displays compact overhead labels for items in Workspace.Dinkets',
+    Default = false,
+    Callback = function(Value)
+        trinketEspEnabled = Value
+    end
+})
+
+WorldEspGroup:AddSlider('TrinketEspDistance', {
+    Text = 'Trinket ESP Distance',
+    Default = 150,
+    Min = 10,
+    Max = 500,
+    Rounding = 0,
+    Tooltip = 'Maximum stud distance to render trinket ESP',
+    Callback = function(Value)
+        trinketMaxDistance = Value
+    end
+})
+
+-- Rarity Filters
+WorldEspGroup:AddToggle('ShowCommonsToggle', {
+    Text = 'Show Common Trinkets',
+    Default = true,
+    Callback = function(Value)
+        showCommons = Value
+    end
+})
+
+WorldEspGroup:AddToggle('ShowRaresToggle', {
+    Text = 'Show Rare Trinkets (Orange)',
+    Default = true,
+    Callback = function(Value)
+        showRares = Value
+    end
+})
+
+WorldEspGroup:AddToggle('ShowUnknownsToggle', {
+    Text = 'Show Unknown Trinkets (Red)',
+    Default = true,
+    Callback = function(Value)
+        showUnknowns = Value
+    end
+})
+
+-- Continuous 20-Stud Distance Sweep Auto Pickup
+local AutoPickupToggle = WorldEspGroup:AddToggle('AutoPickupToggle', {
+    Text = 'Auto Pickup (20 Studs)',
+    Tooltip = 'Continuously sweeps Workspace.Dinkets and clicks items within 20 studs',
+    Default = false,
+    Callback = function(Value)
+        autoPickupEnabled = Value
+        
+        if autoPickupConnection then
+            autoPickupConnection:Disconnect()
+            autoPickupConnection = nil
+        end
+
+        if autoPickupEnabled then
+            autoPickupConnection = RunService.Heartbeat:Connect(function()
+                local char = LocalPlayer.Character or (Workspace:FindFirstChild("Live") and Workspace.Live:FindFirstChild(LocalPlayer.Name))
+                local root = char and char:FindFirstChild("HumanoidRootPart")
+                local dinketsFolder = Workspace:FindFirstChild("Dinkets")
+
+                if root and dinketsFolder then
+                    for _, item in ipairs(dinketsFolder:GetChildren()) do
+                        local part = item:IsA("BasePart") and item or item:FindFirstChildWhichIsA("BasePart", true)
+                        if part then
+                            local distance = (root.Position - part.Position).Magnitude
+                            if distance <= 20 then
+                                local clickDetector = item:FindFirstChildWhichIsA("ClickDetector", true)
+                                if clickDetector then
+                                    fireclickdetector(clickDetector, 0)
+                                end
+                            end
+                        end
+                    end
+                end
+            end)
+        end
+    end
+})
+
+AutoPickupToggle:AddKeyPicker("AutoPickupKeybind", {
+    Default = "E",
+    SyncToggleState = true,
+    Mode = "Toggle",
+    Text = "Auto Pickup Keybind",
+    NoUI = false,
+})
+
+WorldEspGroup:AddButton({
+    Text = 'Print Unknown Mesh IDs',
+    Func = function()
+        print("=== UNKNOWN TRINKET MESH IDS ===")
+        for id in pairs(unknownMeshIDs) do
+            print(id)
+        end
+        Library:Notify({
+            Title = "Mesh IDs Logged",
+            Description = "Logged unknown IDs to Developer Console (F9)",
+            Time = 4
+        })
+    end
+})
+
+--------------------------------------------------------------------------------
+-- 8. INITIALIZE LIBRARY MANAGERS & UI TOGGLE KEYBIND
+--------------------------------------------------------------------------------
+ThemeManager:SetLibrary(Library)
+SaveManager:SetLibrary(Library)
+SaveManager:IgnoreThemeSettings()
+SaveManager:SetIgnoreIndexes({'MenuKeybind', 'FlyKeybind', 'NoClipKeybind', 'AutoPickupKeybind'})
+ThemeManager:SetFolder('EmbarkScript')
+SaveManager:SetFolder('EmbarkScript/configs')
+
+SaveManager:BuildConfigSection(Tabs['UI Settings'])
+ThemeManager:ApplyToTab(Tabs['UI Settings'])
+
+local MenuGroup = Tabs['UI Settings']:AddLeftGroupbox('Menu Controls')
+
+MenuGroup:AddLabel('Toggle Keybind'):AddKeyPicker('MenuKeybind', {
+    Default = 'RightShift',
+    NoUI = false,
+    Text = 'UI Toggle Key',
+    Callback = function()
+        Library:Toggle()
+    end
+})
+
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if not gameProcessed then
+        local keyPicker = Options and Options.MenuKeybind
+        if keyPicker and input.KeyCode == keyPicker.Value then
+            Library:Toggle()
+        end
+    end
+end)
+
+Library:Notify({
+    Title = "Embark Utility Loaded",
+    Description = "Rare trinkets added (Orange). Rarity filters ready.",
+    Time = 4
+})
