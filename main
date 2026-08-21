@@ -74,7 +74,6 @@ local function identifyTrinket(instance)
         end
     end
 
-    -- Clean up ID formatting strings
     meshId = string.gsub(meshId, "%%20", "")
     meshId = string.gsub(meshId, "%s+", "")
 
@@ -601,7 +600,6 @@ local function createTrinketBillboard(instance)
     end)
 end
 
--- Render loop for dynamic ESP distance & rarity filter check
 RunService.RenderStepped:Connect(function()
     local char = LocalPlayer.Character or (Workspace:FindFirstChild("Live") and Workspace.Live:FindFirstChild(LocalPlayer.Name))
     local root = char and char:FindFirstChild("HumanoidRootPart")
@@ -663,7 +661,6 @@ WorldEspGroup:AddSlider('TrinketEspDistance', {
     end
 })
 
--- Rarity Filters
 WorldEspGroup:AddToggle('ShowCommonsToggle', {
     Text = 'Show Common Trinkets',
     Default = true,
@@ -688,7 +685,6 @@ WorldEspGroup:AddToggle('ShowUnknownsToggle', {
     end
 })
 
--- Continuous 20-Stud Distance Sweep Auto Pickup
 local AutoPickupToggle = WorldEspGroup:AddToggle('AutoPickupToggle', {
     Text = 'Auto Pickup (20 Studs)',
     Tooltip = 'Continuously sweeps Workspace.Dinkets and clicks items within 20 studs',
@@ -750,12 +746,14 @@ WorldEspGroup:AddButton({
 })
 
 --------------------------------------------------------------------------------
--- 8. INITIALIZE LIBRARY MANAGERS & UI TOGGLE KEYBIND
+-- 8. INITIALIZE LIBRARY MANAGERS & SCALABLE CONFIG SYSTEM
 --------------------------------------------------------------------------------
 ThemeManager:SetLibrary(Library)
 SaveManager:SetLibrary(Library)
-SaveManager:IgnoreThemeSettings()
-SaveManager:SetIgnoreIndexes({'MenuKeybind', 'FlyKeybind', 'NoClipKeybind', 'AutoPickupKeybind'})
+
+-- Ensure no core keybinds are ignored so user loadouts save everything
+SaveManager:SetIgnoreIndexes({})
+
 ThemeManager:SetFolder('EmbarkScript')
 SaveManager:SetFolder('EmbarkScript/configs')
 
@@ -782,8 +780,11 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
     end
 end)
 
+-- Automatically apply autoload configs if saved by the user
+SaveManager:LoadAutoloadConfig()
+
 Library:Notify({
     Title = "Embark Utility Loaded",
-    Description = "Rare trinkets added (Orange). Rarity filters ready.",
+    Description = "Full config support enabled. All keybinds and settings ready to save.",
     Time = 4
 })
