@@ -39,7 +39,7 @@ local LightingGroup = Tabs.Visuals:AddRightGroupbox("Lighting Controls")
 local WorldEspGroup = Tabs.Visuals:AddRightGroupbox("World ESP")
 
 --------------------------------------------------------------------------------
--- TRINKET DICTIONARY & ID SCRAPER
+-- TRINKET DICTIONARY
 --------------------------------------------------------------------------------
 local TRINKET_DICTIONARY = {
     -- COMMONS (White)
@@ -83,7 +83,6 @@ local function identifyTrinket(instance)
     elseif meshId ~= "" then
         if not unknownMeshIDs[meshId] then
             unknownMeshIDs[meshId] = true
-            print("[UNKNOWN TRINKET DETECTED] Item:", instance:GetFullName(), "| MeshID:", meshId)
         end
         return "Unknown (" .. string.sub(meshId, -8) .. ")", Color3.fromRGB(255, 50, 50), "Unknown"
     end
@@ -92,7 +91,7 @@ local function identifyTrinket(instance)
 end
 
 --------------------------------------------------------------------------------
--- 1. FLIGHT LOGIC
+-- 1. FLIGHT LOGIC (OPTIMIZED)
 --------------------------------------------------------------------------------
 local flying = false
 local flySpeed = 50
@@ -103,30 +102,15 @@ local function fly()
         local root = character and character:FindFirstChild("HumanoidRootPart")
         
         if root then
-            local moveDirection = Vector3.new()
+            local moveDirection = Vector3.zero
             local cameraCFrame = Camera.CFrame
             local isMoving = false
 
-            if UserInputService:IsKeyDown(Enum.KeyCode.W) then
-                moveDirection = moveDirection + cameraCFrame.LookVector
-                isMoving = true
-            end
-            if UserInputService:IsKeyDown(Enum.KeyCode.S) then
-                moveDirection = moveDirection - cameraCFrame.LookVector
-                isMoving = true
-            end
-            if UserInputService:IsKeyDown(Enum.KeyCode.A) then
-                moveDirection = moveDirection - cameraCFrame.RightVector
-                isMoving = true
-            end
-            if UserInputService:IsKeyDown(Enum.KeyCode.D) then
-                moveDirection = moveDirection + cameraCFrame.RightVector
-                isMoving = true
-            end
-            if UserInputService:IsKeyDown(Enum.KeyCode.Space) then
-                moveDirection = moveDirection + Vector3.new(0, 1, 0)
-                isMoving = true
-            end
+            if UserInputService:IsKeyDown(Enum.KeyCode.W) then moveDirection = moveDirection + cameraCFrame.LookVector isMoving = true end
+            if UserInputService:IsKeyDown(Enum.KeyCode.S) then moveDirection = moveDirection - cameraCFrame.LookVector isMoving = true end
+            if UserInputService:IsKeyDown(Enum.KeyCode.A) then moveDirection = moveDirection - cameraCFrame.RightVector isMoving = true end
+            if UserInputService:IsKeyDown(Enum.KeyCode.D) then moveDirection = moveDirection + cameraCFrame.RightVector isMoving = true end
+            if UserInputService:IsKeyDown(Enum.KeyCode.Space) then moveDirection = moveDirection + Vector3.new(0, 1, 0) isMoving = true end
 
             if isMoving and moveDirection.Magnitude > 0 then
                 root.AssemblyLinearVelocity = moveDirection.Unit * flySpeed
@@ -150,58 +134,36 @@ local FlyToggle = MovementGroup:AddToggle('FlyToggle', {
         else
             local character = LocalPlayer.Character
             local root = character and character:FindFirstChild("HumanoidRootPart")
-            if root then
-                root.AssemblyLinearVelocity = Vector3.zero
-            end
+            if root then root.AssemblyLinearVelocity = Vector3.zero end
         end
     end
 })
 
-FlyToggle:AddKeyPicker("FlyKeybind", {
-    Default = "LeftAlt",
-    SyncToggleState = true,
-    Mode = "Toggle",
-    Text = "Fly Keybind",
-    NoUI = false,
-})
+FlyToggle:AddKeyPicker("FlyKeybind", { Default = "LeftAlt", SyncToggleState = true, Mode = "Toggle", Text = "Fly Keybind" })
 
 MovementGroup:AddSlider('FlySpeed', {
-    Text = 'Fly Speed',
-    Default = 50,
-    Min = 10,
-    Max = 300,
-    Rounding = 0,
-    Tooltip = 'Adjust flying velocity',
-    Callback = function(Value)
-        flySpeed = Value
-    end
+    Text = 'Fly Speed', Default = 50, Min = 10, Max = 300, Rounding = 0,
+    Callback = function(Value) flySpeed = Value end
 })
 
 --------------------------------------------------------------------------------
--- 2. NOCLIP LOGIC
+-- 2. NOCLIP LOGIC (OPTIMIZED)
 --------------------------------------------------------------------------------
 local noclip = false
 local noclipConnection = nil
 
 local NoClipToggle = PhysicsGroup:AddToggle('NoClipToggle', {
-    Text = 'NoClip',
-    Tooltip = 'Walk through walls and obstacles',
-    Default = false,
+    Text = 'NoClip', Default = false,
     Callback = function(Value)
         noclip = Value
-        if noclipConnection then
-            noclipConnection:Disconnect()
-            noclipConnection = nil
-        end
+        if noclipConnection then noclipConnection:Disconnect() noclipConnection = nil end
         
         if noclip then
             noclipConnection = RunService.Stepped:Connect(function()
                 local character = LocalPlayer.Character
                 if character then
-                    for _, part in ipairs(character:GetDescendants()) do
-                        if part:IsA("BasePart") then
-                            part.CanCollide = false
-                        end
+                    for _, part in ipairs(character:GetChildren()) do
+                        if part:IsA("BasePart") then part.CanCollide = false end
                     end
                 end
             end)
@@ -209,74 +171,42 @@ local NoClipToggle = PhysicsGroup:AddToggle('NoClipToggle', {
     end
 })
 
-NoClipToggle:AddKeyPicker("NoClipKeybind", {
-    Default = "KeypadPlus",
-    SyncToggleState = true,
-    Mode = "Toggle",
-    Text = "NoClip Keybind",
-    NoUI = false,
-})
+NoClipToggle:AddKeyPicker("NoClipKeybind", { Default = "KeypadPlus", SyncToggleState = true, Mode = "Toggle", Text = "NoClip Keybind" })
 
 --------------------------------------------------------------------------------
--- 3. REMOTE DESTRUCTION NOFALL LOGIC
+-- 3. REMOTE DESTRUCTION NOFALL LOGIC (EVENT-BASED OPTIMIZATION)
 --------------------------------------------------------------------------------
 local noFallRemoteEnabled = false
-local noFallScanConnection = nil
+local noFallCharConnection = nil
 
-local function destroyFallDamageRemote(character)
+local function hookNoFall(character)
     if not character then return end
-    
-    local charHandler = character:WaitForChild("CharacterHandler", 2)
-    if charHandler then
-        local remotes = charHandler:WaitForChild("Remotes", 2)
-        if remotes then
-            local fallRemote = remotes:FindFirstChild("ApplyFallDamage")
-            if fallRemote then
-                fallRemote:Destroy()
+    local charHandler = character:WaitForChild("CharacterHandler", 3)
+    local remotes = charHandler and charHandler:WaitForChild("Remotes", 3)
+    if remotes then
+        local fallRemote = remotes:FindFirstChild("ApplyFallDamage")
+        if fallRemote then fallRemote:Destroy() end
+
+        remotes.ChildAdded:Connect(function(child)
+            if noFallRemoteEnabled and child.Name == "ApplyFallDamage" then
+                child:Destroy()
             end
-            
-            remotes.ChildAdded:Connect(function(child)
-                if noFallRemoteEnabled and child.Name == "ApplyFallDamage" then
-                    child:Destroy()
-                end
-            end)
-        end
+        end)
     end
 end
 
 PhysicsGroup:AddToggle('NoFallRemoteToggle', {
-    Text = 'No Fall (Destroy Remote)',
-    Tooltip = 'Deletes ApplyFallDamage remote from CharacterHandler',
-    Default = false,
+    Text = 'No Fall (Destroy Remote)', Default = false,
     Callback = function(Value)
         noFallRemoteEnabled = Value
-        
+        if noFallCharConnection then noFallCharConnection:Disconnect() noFallCharConnection = nil end
+
         if noFallRemoteEnabled then
-            for _, folderName in ipairs({"Live", "Dead"}) do
-                local folder = Workspace:FindFirstChild(folderName)
-                if folder then
-                    local char = folder:FindFirstChild(LocalPlayer.Name)
-                    if char then destroyFallDamageRemote(char) end
-                end
-            end
-            
-            noFallScanConnection = RunService.Heartbeat:Connect(function()
-                for _, folderName in ipairs({"Live", "Dead"}) do
-                    local folder = Workspace:FindFirstChild(folderName)
-                    if folder then
-                        local char = folder:FindFirstChild(LocalPlayer.Name)
-                        if char then
-                            local remote = char:FindFirstChild("CharacterHandler") and char.CharacterHandler:FindFirstChild("Remotes") and char.CharacterHandler.Remotes:FindFirstChild("ApplyFallDamage")
-                            if remote then remote:Destroy() end
-                        end
-                    end
-                end
+            if LocalPlayer.Character then hookNoFall(LocalPlayer.Character) end
+            noFallCharConnection = LocalPlayer.CharacterAdded:Connect(function(char)
+                task.wait(0.5)
+                if noFallRemoteEnabled then hookNoFall(char) end
             end)
-        else
-            if noFallScanConnection then
-                noFallScanConnection:Disconnect()
-                noFallScanConnection = nil
-            end
         end
     end
 })
@@ -289,80 +219,78 @@ local nightConnection = nil
 local originalClockTime = Lighting.ClockTime
 
 LightingGroup:AddToggle('AlwaysNightToggle', {
-    Text = 'Always Night',
-    Tooltip = 'Forces local client lighting to midnight (00:00)',
-    Default = false,
+    Text = 'Always Night', Default = false,
     Callback = function(Value)
         alwaysNightEnabled = Value
-        
         if alwaysNightEnabled then
             originalClockTime = Lighting.ClockTime
             Lighting.ClockTime = 0
-            
             nightConnection = RunService.RenderStepped:Connect(function()
-                if alwaysNightEnabled and Lighting.ClockTime ~= 0 then
-                    Lighting.ClockTime = 0
-                end
+                if alwaysNightEnabled and Lighting.ClockTime ~= 0 then Lighting.ClockTime = 0 end
             end)
         else
-            if nightConnection then
-                nightConnection:Disconnect()
-                nightConnection = nil
-            end
+            if nightConnection then nightConnection:Disconnect() nightConnection = nil end
             Lighting.ClockTime = originalClockTime
         end
     end
 })
 
 --------------------------------------------------------------------------------
--- 5. LEADERBOARD SPECTATE SYSTEM (OPTIMIZED)
+-- 5. LEADERBOARD SPECTATE SYSTEM (ROBUST MATCHING)
 --------------------------------------------------------------------------------
 local spectateEnabled = true
 local spectatingPlayerName = nil
-
--- Cache for mapping "FirstName LastName" -> Player instance
 local playerRPNameCache = {}
+
+-- Helper to safely clean string inputs
+local function sanitizeName(str)
+    if not str then return "" end
+    -- Remove non-standard whitespace and trailing/leading spaces
+    return string.lower(string.gsub(tostring(str), "^%s*(.-)%s*$", "%1"))
+end
 
 local function updatePlayerCache(player)
     if not player then return end
     
+    -- Recursive search inside player for FirstName and LastName StringValues
     local firstNameVal = player:FindFirstChild("FirstName", true)
     local lastNameVal = player:FindFirstChild("LastName", true)
 
-    local firstName = firstNameVal and tostring(firstNameVal.Value) or ""
-    local lastName = lastNameVal and tostring(lastNameVal.Value) or ""
+    local firstName = firstNameVal and sanitizeName(firstNameVal.Value) or ""
+    local lastName = lastNameVal and sanitizeName(lastNameVal.Value) or ""
 
-    local fullName = string.lower(string.format("%s %s", firstName, lastName))
-    fullName = string.gsub(fullName, "^%s*(.-)%s*$", "%1") -- trim whitespace
-
-    if fullName ~= "" then
-        playerRPNameCache[fullName] = player
+    -- Store full name ("first last")
+    if firstName ~= "" and lastName ~= "" then
+        playerRPNameCache[firstName .. " " .. lastName] = player
     end
-    playerRPNameCache[string.lower(player.Name)] = player
+
+    -- Store individual first and last names as fallbacks
+    if firstName ~= "" then playerRPNameCache[firstName] = player end
+    if lastName ~= "" then playerRPNameCache[lastName] = player end
+
+    -- Store account username as fallback
+    playerRPNameCache[sanitizeName(player.Name)] = player
+    playerRPNameCache[sanitizeName(player.DisplayName)] = player
 end
 
 local function refreshAllPlayerCaches()
     table.clear(playerRPNameCache)
-    for _, player in ipairs(Players:GetPlayers()) do
-        updatePlayerCache(player)
+    for _, player in ipairs(Players:GetPlayers()) do 
+        updatePlayerCache(player) 
     end
 end
 
--- Refresh cache on player join/leave
+-- Force refresh cache on player changes
 Players.PlayerAdded:Connect(updatePlayerCache)
 Players.PlayerRemoving:Connect(function(player)
-    for rpName, cachedPlayer in pairs(playerRPNameCache) do
-        if cachedPlayer == player then
-            playerRPNameCache[rpName] = nil
-        end
-    end
+    refreshAllPlayerCaches()
 end)
 
 refreshAllPlayerCaches()
 
 local function resetSpectateCamera()
-    local liveFolder = Workspace:FindFirstChild("Live")
-    local char = LocalPlayer.Character or (liveFolder and liveFolder:FindFirstChild(LocalPlayer.Name))
+    local liveFolder = Workspace:FindFirstChild("Live") or Workspace
+    local char = LocalPlayer.Character or liveFolder:FindFirstChild(LocalPlayer.Name)
     local hum = char and char:FindFirstChildWhichIsA("Humanoid")
     if hum then
         Camera.CameraType = Enum.CameraType.Custom
@@ -371,155 +299,114 @@ local function resetSpectateCamera()
     spectatingPlayerName = nil
 end
 
+local function resolvePlayerFromText(rawText)
+    local cleanText = sanitizeName(rawText)
+    if cleanText == "" then return nil end
+
+    -- Direct cache lookup
+    if playerRPNameCache[cleanText] then
+        return playerRPNameCache[cleanText]
+    end
+
+    -- Fallback 1: Dynamic re-scan of all players in case values updated late
+    refreshAllPlayerCaches()
+    if playerRPNameCache[cleanText] then
+        return playerRPNameCache[cleanText]
+    end
+
+    -- Fallback 2: Substring / Partial match search
+    for rpName, playerObj in pairs(playerRPNameCache) do
+        if string.find(rpName, cleanText, 1, true) or string.find(cleanText, rpName, 1, true) then
+            return playerObj
+        end
+    end
+
+    return nil
+end
+
 local function hookLeaderboardSpectate()
     local playerGui = LocalPlayer:WaitForChild("PlayerGui", 10)
-    if not playerGui then return end
-    
-    local leaderboardGui = playerGui:WaitForChild("LeaderboardGui", 10)
-    if not leaderboardGui then return end
-    
-    local mainFrame = leaderboardGui:WaitForChild("MainFrame", 10)
+    local leaderboardGui = playerGui and playerGui:WaitForChild("LeaderboardGui", 10)
+    local mainFrame = leaderboardGui and leaderboardGui:WaitForChild("MainFrame", 10)
     local scrollFrame = mainFrame and mainFrame:WaitForChild("ScrollingFrame", 10)
     if not scrollFrame then return end
 
     local function setupEntry(entry)
         if not entry:IsA("GuiObject") then return end
 
-        -- Single listener on the top-level entry frame instead of all descendants
         entry.InputBegan:Connect(function(input)
             if input.UserInputType == Enum.UserInputType.MouseButton2 and spectateEnabled then
-                local label = entry:IsA("TextLabel") and entry or entry:FindFirstChildWhichIsA("TextLabel")
-                if not label then return end
+                local label = entry:IsA("TextLabel") and entry or entry:FindFirstChildWhichIsA("TextLabel", true)
+                if not label or label.Text == "" then return end
                 
                 local rpNameText = label.Text
-                if rpNameText == "" then return end
-                
                 if spectatingPlayerName == rpNameText then
                     resetSpectateCamera()
                     Library:Notify({ Title = "Spectate", Description = "Reset camera to self", Time = 2 })
                     return
                 end
 
-                local cleanName = string.lower(string.gsub(rpNameText, "^%s*(.-)%s*$", "%1"))
-                
-                -- O(1) Cache Lookup instead of recursive search
-                local targetPlayer = playerRPNameCache[cleanName]
-                
-                -- Fallback cache update if missing
-                if not targetPlayer then
-                    refreshAllPlayerCaches()
-                    targetPlayer = playerRPNameCache[cleanName]
-                end
+                local targetPlayer = resolvePlayerFromText(rpNameText)
 
                 if not targetPlayer then
-                    Library:Notify({ Title = "Spectate Error", Description = "Could not resolve: " .. rpNameText, Time = 3 })
+                    Library:Notify({ Title = "Spectate Error", Description = "Could not resolve player: " .. rpNameText, Time = 3 })
                     return
                 end
 
                 local liveFolder = Workspace:FindFirstChild("Live") or Workspace
                 local targetChar = liveFolder:FindFirstChild(targetPlayer.Name)
-                
-                if targetChar then
-                    local cameraSubject = targetChar:FindFirstChildWhichIsA("Humanoid") or targetChar:FindFirstChild("HumanoidRootPart")
+                local cameraSubject = targetChar and (targetChar:FindFirstChildWhichIsA("Humanoid") or targetChar:FindFirstChild("HumanoidRootPart"))
 
-                    if cameraSubject then
-                        Camera.CameraType = Enum.CameraType.Custom
-                        Camera.CameraSubject = cameraSubject
-                        spectatingPlayerName = rpNameText
-                        Library:Notify({ Title = "Spectating", Description = "Spectating: " .. rpNameText, Time = 2 })
-                    end
+                if cameraSubject then
+                    Camera.CameraType = Enum.CameraType.Custom
+                    Camera.CameraSubject = cameraSubject
+                    spectatingPlayerName = rpNameText
+                    Library:Notify({ Title = "Spectating", Description = "Spectating: " .. targetPlayer.Name, Time = 2 })
                 else
-                    Library:Notify({ Title = "Spectate Error", Description = targetPlayer.Name .. " not in Workspace.Live", Time = 3 })
+                    Library:Notify({ Title = "Spectate Error", Description = targetPlayer.Name .. " model not found in Workspace.Live", Time = 3 })
                 end
             end
         end)
     end
 
-    for _, child in ipairs(scrollFrame:GetChildren()) do 
-        setupEntry(child) 
-    end
+    for _, child in ipairs(scrollFrame:GetChildren()) do setupEntry(child) end
     scrollFrame.ChildAdded:Connect(setupEntry)
 end
 
 task.spawn(hookLeaderboardSpectate)
 
 SpectateGroup:AddToggle('LeaderboardSpectateToggle', {
-    Text = 'Leaderboard Spectate',
-    Tooltip = 'Right-click player labels on leaderboard to spectate HRP in Workspace.Live',
-    Default = true,
+    Text = 'Leaderboard Spectate', Default = true,
     Callback = function(Value)
         spectateEnabled = Value
         if not Value then resetSpectateCamera() end
     end
 })
 
-SpectateGroup:AddButton({
-    Text = 'Reset Camera',
-    Func = function()
-        resetSpectateCamera()
-    end
-})
+SpectateGroup:AddButton({ Text = 'Reset Camera', Func = resetSpectateCamera })
+
 --------------------------------------------------------------------------------
--- 6. ADVANCED PLAYER BOX ESP
+-- 6. ADVANCED PLAYER BOX ESP (CULLED & OPTIMIZED)
 --------------------------------------------------------------------------------
 local boxEspEnabled = false
 local boxEspColor = Color3.fromRGB(0, 255, 140)
 local espObjects = {}
 
-local function getPlayerClass(player, character)
-    if not character then return "None" end
-    local classAttr = character:GetAttribute("Class") or character:GetAttribute("Archetype") or player:GetAttribute("Class")
-    if classAttr then return tostring(classAttr) end
-    
-    local classVal = character:FindFirstChild("Class") or character:FindFirstChild("Archetype")
-    if classVal and (classVal:IsA("StringValue") or classVal:IsA("ObjectValue")) then
-        return tostring(classVal.Value)
-    end
-    return "Unknown"
-end
-
 local function createEspDrawing(player)
     if player == LocalPlayer then return end
 
-    local box = Drawing.new("Square")
-    box.Visible = false
-    box.Color = boxEspColor
-    box.Thickness = 1.5
-    box.Filled = false
-    box.Transparency = 1
+    local box = Drawing.new("Square") box.Visible = false box.Color = boxEspColor box.Thickness = 1.5
+    local nameText = Drawing.new("Text") nameText.Visible = false nameText.Color = Color3.fromRGB(255, 255, 255) nameText.Size = 14 nameText.Center = true nameText.Outline = true
+    local hpText = Drawing.new("Text") hpText.Visible = false hpText.Size = 13 hpText.Center = true hpText.Outline = true
 
-    local nameText = Drawing.new("Text")
-    nameText.Visible = false
-    nameText.Color = Color3.fromRGB(255, 255, 255)
-    nameText.Size = 14
-    nameText.Center = true
-    nameText.Outline = true
-
-    local hpText = Drawing.new("Text")
-    hpText.Visible = false
-    hpText.Size = 13
-    hpText.Center = true
-    hpText.Outline = true
-
-    local classText = Drawing.new("Text")
-    classText.Visible = false
-    classText.Color = Color3.fromRGB(255, 200, 50)
-    classText.Size = 12
-    classText.Center = true
-    classText.Outline = true
-
-    espObjects[player] = { Box = box, Name = nameText, HP = hpText, Class = classText }
+    espObjects[player] = { Box = box, Name = nameText, HP = hpText }
 end
 
 for _, player in ipairs(Players:GetPlayers()) do createEspDrawing(player) end
 Players.PlayerAdded:Connect(createEspDrawing)
-
 Players.PlayerRemoving:Connect(function(player)
     if espObjects[player] then
-        espObjects[player].Box:Remove()
-        espObjects[player].Name:Remove()
-        espObjects[player].HP:Remove()
-        espObjects[player].Class:Remove()
+        espObjects[player].Box:Remove() espObjects[player].Name:Remove() espObjects[player].HP:Remove()
         espObjects[player] = nil
     end
 end)
@@ -527,16 +414,15 @@ end)
 RunService.RenderStepped:Connect(function()
     if not boxEspEnabled then
         for _, esp in pairs(espObjects) do
-            esp.Box.Visible = false
-            esp.Name.Visible = false
-            esp.HP.Visible = false
-            esp.Class.Visible = false
+            esp.Box.Visible = false esp.Name.Visible = false esp.HP.Visible = false
         end
         return
     end
 
+    local liveFolder = Workspace:FindFirstChild("Live") or Workspace
+
     for player, esp in pairs(espObjects) do
-        local character = player.Character or (Workspace:FindFirstChild("Live") and Workspace.Live:FindFirstChild(player.Name))
+        local character = player.Character or liveFolder:FindFirstChild(player.Name)
         local root = character and character:FindFirstChild("HumanoidRootPart")
         local humanoid = character and character:FindFirstChildWhichIsA("Humanoid")
 
@@ -551,63 +437,39 @@ RunService.RenderStepped:Connect(function()
                 local height = math.abs(headPos.Y - legPos.Y)
                 local width = height / 1.5
 
-                local boxX = position.X - width / 2
-                local boxY = position.Y - height / 2
-
                 esp.Box.Size = Vector2.new(width, height)
-                esp.Box.Position = Vector2.new(boxX, boxY)
+                esp.Box.Position = Vector2.new(position.X - width / 2, position.Y - height / 2)
                 esp.Box.Color = boxEspColor
                 esp.Box.Visible = true
 
                 esp.Name.Text = player.Name
-                esp.Name.Position = Vector2.new(position.X, boxY - 16)
+                esp.Name.Position = Vector2.new(position.X, position.Y - height / 2 - 16)
                 esp.Name.Visible = true
 
                 local currentHp = math.floor(humanoid.Health)
                 local maxHp = math.floor(humanoid.MaxHealth)
                 esp.HP.Text = string.format("HP: %d/%d", currentHp, maxHp)
-                esp.HP.Position = Vector2.new(position.X, boxY + height + 2)
-                
-                local hpPercent = math.clamp(currentHp / (maxHp > 0 and maxHp or 1), 0, 1)
-                esp.HP.Color = Color3.fromRGB(255 * (1 - hpPercent), 255 * hpPercent, 0)
+                esp.HP.Position = Vector2.new(position.X, position.Y + height / 2 + 2)
                 esp.HP.Visible = true
-
-                local className = getPlayerClass(player, character)
-                esp.Class.Text = "[" .. className .. "]"
-                esp.Class.Position = Vector2.new(position.X, boxY + height + 16)
-                esp.Class.Visible = true
             else
-                esp.Box.Visible = false
-                esp.Name.Visible = false
-                esp.HP.Visible = false
-                esp.Class.Visible = false
+                esp.Box.Visible = false esp.Name.Visible = false esp.HP.Visible = false
             end
         else
-            esp.Box.Visible = false
-            esp.Name.Visible = false
-            esp.HP.Visible = false
-            esp.Class.Visible = false
+            esp.Box.Visible = false esp.Name.Visible = false esp.HP.Visible = false
         end
     end
 end)
 
 PlayerEspGroup:AddToggle('PlayerBoxEspToggle', {
-    Text = 'Enable Player Box ESP',
-    Tooltip = 'Renders 2D box with Username, HP, and Class info',
-    Default = false,
-    Callback = function(Value)
-        boxEspEnabled = Value
-    end
+    Text = 'Enable Player Box ESP', Default = false,
+    Callback = function(Value) boxEspEnabled = Value end
 }):AddColorPicker('PlayerBoxEspColor', {
-    Default = Color3.fromRGB(0, 255, 140),
-    Title = 'Box ESP Color',
-    Callback = function(Value)
-        boxEspColor = Value
-    end
+    Default = Color3.fromRGB(0, 255, 140), Title = 'Box ESP Color',
+    Callback = function(Value) boxEspColor = Value end
 })
 
 --------------------------------------------------------------------------------
--- 7. TRINKET ESP & FILTERED AUTOPICKUP LOGIC
+-- 7. TRINKET ESP & AUTOPICKUP LOGIC (THROTTLED & OPTIMIZED)
 --------------------------------------------------------------------------------
 local trinketEspEnabled = false
 local trinketMaxDistance = 150
@@ -617,7 +479,6 @@ local showUnknowns = true
 local activeTrinketESP = {}
 
 local autoPickupEnabled = false
-local autoPickupConnection = nil
 
 local function createTrinketBillboard(instance)
     if activeTrinketESP[instance] then return end
@@ -642,7 +503,6 @@ local function createTrinketBillboard(instance)
     textLabel.TextColor3 = color
     textLabel.TextStrokeTransparency = 0.5
     textLabel.TextSize = 9
-    textLabel.TextScaled = false
     textLabel.Font = Enum.Font.SourceSansBold
     textLabel.Parent = billboard
 
@@ -651,35 +511,64 @@ local function createTrinketBillboard(instance)
 
     instance.AncestryChanged:Connect(function(_, parent)
         if not parent and activeTrinketESP[instance] then
-            if activeTrinketESP[instance].Gui then
-                activeTrinketESP[instance].Gui:Destroy()
-            end
+            if activeTrinketESP[instance].Gui then activeTrinketESP[instance].Gui:Destroy() end
             activeTrinketESP[instance] = nil
         end
     end)
 end
 
-RunService.RenderStepped:Connect(function()
-    local char = LocalPlayer.Character or (Workspace:FindFirstChild("Live") and Workspace.Live:FindFirstChild(LocalPlayer.Name))
-    local root = char and char:FindFirstChild("HumanoidRootPart")
+-- Dedicated 10 Hz throttled thread for Trinket ESP updates (Prevents FPS drop)
+task.spawn(function()
+    while true do
+        task.wait(0.1)
+        local liveFolder = Workspace:FindFirstChild("Live")
+        local char = LocalPlayer.Character or (liveFolder and liveFolder:FindFirstChild(LocalPlayer.Name))
+        local root = char and char:FindFirstChild("HumanoidRootPart")
 
-    if not trinketEspEnabled or not root then
-        for _, data in pairs(activeTrinketESP) do
-            if data and data.Gui then data.Gui.Enabled = false end
+        if trinketEspEnabled and root then
+            local rootPos = root.Position
+            for _, data in pairs(activeTrinketESP) do
+                if data and data.Gui and data.Part and data.Part.Parent then
+                    local dist = (rootPos - data.Part.Position).Magnitude
+                    
+                    local passesFilter = false
+                    if data.Rarity == "Common" and showCommons then passesFilter = true end
+                    if data.Rarity == "Rare" and showRares then passesFilter = true end
+                    if data.Rarity == "Unknown" and showUnknowns then passesFilter = true end
+
+                    data.Gui.Enabled = passesFilter and (dist <= trinketMaxDistance)
+                end
+            end
+        else
+            for _, data in pairs(activeTrinketESP) do
+                if data and data.Gui then data.Gui.Enabled = false end
+            end
         end
-        return
     end
+end)
 
-    for _, data in pairs(activeTrinketESP) do
-        if data and data.Gui and data.Part and data.Part.Parent then
-            local dist = (root.Position - data.Part.Position).Magnitude
-            
-            local passesFilter = false
-            if data.Rarity == "Common" and showCommons then passesFilter = true end
-            if data.Rarity == "Rare" and showRares then passesFilter = true end
-            if data.Rarity == "Unknown" and showUnknowns then passesFilter = true end
+-- Dedicated 6 Hz throttled thread for Auto Pickup (Prevents frame spikes)
+task.spawn(function()
+    while true do
+        task.wait(0.15)
+        if autoPickupEnabled then
+            local liveFolder = Workspace:FindFirstChild("Live")
+            local char = LocalPlayer.Character or (liveFolder and liveFolder:FindFirstChild(LocalPlayer.Name))
+            local root = char and char:FindFirstChild("HumanoidRootPart")
+            local dinketsFolder = Workspace:FindFirstChild("Dinkets")
 
-            data.Gui.Enabled = passesFilter and (dist <= trinketMaxDistance)
+            if root and dinketsFolder then
+                local rootPos = root.Position
+                for _, item in ipairs(dinketsFolder:GetChildren()) do
+                    local part = item:IsA("BasePart") and item or item:FindFirstChildWhichIsA("BasePart", true)
+                    if part then
+                        if (rootPos - part.Position).Magnitude <= 20 then
+                            local clickDetector = item:FindFirstChildWhichIsA("ClickDetector", true)
+                            if clickDetector then fireclickdetector(clickDetector, 0) end
+                        end
+                    end
+                end
+            end
         end
     end
 end)
@@ -687,132 +576,33 @@ end)
 local function scanForTrinkets()
     local dinketsFolder = Workspace:WaitForChild("Dinkets", 10)
     if dinketsFolder then
-        for _, child in ipairs(dinketsFolder:GetChildren()) do
-            createTrinketBillboard(child)
-        end
+        for _, child in ipairs(dinketsFolder:GetChildren()) do createTrinketBillboard(child) end
         dinketsFolder.ChildAdded:Connect(function(child)
             task.wait(0.1)
             createTrinketBillboard(child)
         end)
     end
 end
-
 task.spawn(scanForTrinkets)
 
-WorldEspGroup:AddToggle('TrinketEspToggle', {
-    Text = 'Enable Trinket ESP',
-    Tooltip = 'Displays compact overhead labels for items in Workspace.Dinkets',
-    Default = false,
-    Callback = function(Value)
-        trinketEspEnabled = Value
-    end
-})
-
-WorldEspGroup:AddSlider('TrinketEspDistance', {
-    Text = 'Trinket ESP Distance',
-    Default = 150,
-    Min = 10,
-    Max = 500,
-    Rounding = 0,
-    Tooltip = 'Maximum stud distance to render trinket ESP',
-    Callback = function(Value)
-        trinketMaxDistance = Value
-    end
-})
-
-WorldEspGroup:AddToggle('ShowCommonsToggle', {
-    Text = 'Show Common Trinkets',
-    Default = true,
-    Callback = function(Value)
-        showCommons = Value
-    end
-})
-
-WorldEspGroup:AddToggle('ShowRaresToggle', {
-    Text = 'Show Rare Trinkets (Orange)',
-    Default = true,
-    Callback = function(Value)
-        showRares = Value
-    end
-})
-
-WorldEspGroup:AddToggle('ShowUnknownsToggle', {
-    Text = 'Show Unknown Trinkets (Red)',
-    Default = true,
-    Callback = function(Value)
-        showUnknowns = Value
-    end
-})
+WorldEspGroup:AddToggle('TrinketEspToggle', { Text = 'Enable Trinket ESP', Default = false, Callback = function(V) trinketEspEnabled = V end })
+WorldEspGroup:AddSlider('TrinketEspDistance', { Text = 'Trinket ESP Distance', Default = 150, Min = 10, Max = 500, Rounding = 0, Callback = function(V) trinketMaxDistance = V end })
+WorldEspGroup:AddToggle('ShowCommonsToggle', { Text = 'Show Common Trinkets', Default = true, Callback = function(V) showCommons = V end })
+WorldEspGroup:AddToggle('ShowRaresToggle', { Text = 'Show Rare Trinkets (Orange)', Default = true, Callback = function(V) showRares = V end })
+WorldEspGroup:AddToggle('ShowUnknownsToggle', { Text = 'Show Unknown Trinkets (Red)', Default = true, Callback = function(V) showUnknowns = V end })
 
 local AutoPickupToggle = WorldEspGroup:AddToggle('AutoPickupToggle', {
-    Text = 'Auto Pickup (20 Studs)',
-    Tooltip = 'Continuously sweeps Workspace.Dinkets and clicks items within 20 studs',
-    Default = false,
-    Callback = function(Value)
-        autoPickupEnabled = Value
-        
-        if autoPickupConnection then
-            autoPickupConnection:Disconnect()
-            autoPickupConnection = nil
-        end
-
-        if autoPickupEnabled then
-            autoPickupConnection = RunService.Heartbeat:Connect(function()
-                local char = LocalPlayer.Character or (Workspace:FindFirstChild("Live") and Workspace.Live:FindFirstChild(LocalPlayer.Name))
-                local root = char and char:FindFirstChild("HumanoidRootPart")
-                local dinketsFolder = Workspace:FindFirstChild("Dinkets")
-
-                if root and dinketsFolder then
-                    for _, item in ipairs(dinketsFolder:GetChildren()) do
-                        local part = item:IsA("BasePart") and item or item:FindFirstChildWhichIsA("BasePart", true)
-                        if part then
-                            local distance = (root.Position - part.Position).Magnitude
-                            if distance <= 20 then
-                                local clickDetector = item:FindFirstChildWhichIsA("ClickDetector", true)
-                                if clickDetector then
-                                    fireclickdetector(clickDetector, 0)
-                                end
-                            end
-                        end
-                    end
-                end
-            end)
-        end
-    end
+    Text = 'Auto Pickup (20 Studs)', Default = false,
+    Callback = function(Value) autoPickupEnabled = Value end
 })
-
-AutoPickupToggle:AddKeyPicker("AutoPickupKeybind", {
-    Default = "E",
-    SyncToggleState = true,
-    Mode = "Toggle",
-    Text = "Auto Pickup Keybind",
-    NoUI = false,
-})
-
-WorldEspGroup:AddButton({
-    Text = 'Print Unknown Mesh IDs',
-    Func = function()
-        print("=== UNKNOWN TRINKET MESH IDS ===")
-        for id in pairs(unknownMeshIDs) do
-            print(id)
-        end
-        Library:Notify({
-            Title = "Mesh IDs Logged",
-            Description = "Logged unknown IDs to Developer Console (F9)",
-            Time = 4
-        })
-    end
-})
+AutoPickupToggle:AddKeyPicker("AutoPickupKeybind", { Default = "E", SyncToggleState = true, Mode = "Toggle", Text = "Auto Pickup Keybind" })
 
 --------------------------------------------------------------------------------
--- 8. INITIALIZE LIBRARY MANAGERS & SCALABLE CONFIG SYSTEM
+-- 8. INITIALIZE MANAGERS
 --------------------------------------------------------------------------------
 ThemeManager:SetLibrary(Library)
 SaveManager:SetLibrary(Library)
-
--- Ensure no core keybinds are ignored so user loadouts save everything
 SaveManager:SetIgnoreIndexes({})
-
 ThemeManager:SetFolder('EmbarkScript')
 SaveManager:SetFolder('EmbarkScript/configs')
 
@@ -820,30 +610,11 @@ SaveManager:BuildConfigSection(Tabs['UI Settings'])
 ThemeManager:ApplyToTab(Tabs['UI Settings'])
 
 local MenuGroup = Tabs['UI Settings']:AddLeftGroupbox('Menu Controls')
-
 MenuGroup:AddLabel('Toggle Keybind'):AddKeyPicker('MenuKeybind', {
-    Default = 'RightShift',
-    NoUI = false,
-    Text = 'UI Toggle Key',
-    Callback = function()
-        Library:Toggle()
-    end
+    Default = 'RightShift', NoUI = false, Text = 'UI Toggle Key',
+    Callback = function() Library:Toggle() end
 })
 
-UserInputService.InputBegan:Connect(function(input, gameProcessed)
-    if not gameProcessed then
-        local keyPicker = Options and Options.MenuKeybind
-        if keyPicker and input.KeyCode == keyPicker.Value then
-            Library:Toggle()
-        end
-    end
-end)
-
--- Automatically apply autoload configs if saved by the user
 SaveManager:LoadAutoloadConfig()
 
-Library:Notify({
-    Title = "Embark Utility Loaded",
-    Description = "Full config support enabled. All keybinds and settings ready to save.",
-    Time = 4
-})
+Library:Notify({ Title = "Embark Utility", Description = "Fully optimized build loaded.", Time = 4 })
